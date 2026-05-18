@@ -17,14 +17,14 @@
 
 ```mermaid
 graph TD
-    subgraph Host [Host OS (로컬 PC)]
-        User([사용자 / Web Browser])
+    subgraph Host ["Host OS (로컬 PC)"]
+        User(["사용자 / Web Browser"])
     end
 
-    subgraph Network [Docker Compose 내부 네트워크]
-        App[app (Spring Boot 컨테이너)]
-        DB[(db (PostgreSQL 15 컨테이너))]
-        PgAdmin[pgadmin (pgAdmin4 컨테이너)]
+    subgraph Network ["Docker Compose 내부 네트워크"]
+        App["app (Spring Boot 컨테이너)"]
+        DB[("db (PostgreSQL 15 컨테이너)")]
+        PgAdmin["pgadmin (pgAdmin4 컨테이너)"]
     end
 
     User -->|Port 8080| App
