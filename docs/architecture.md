@@ -18,19 +18,28 @@
 ```mermaid
 graph TD
     subgraph Host ["Host OS (로컬 PC)"]
-        User(["사용자 / Web Browser"])
+        User(["사용자 (Web Browser)"])
     end
 
     subgraph Network ["Docker Compose 내부 네트워크"]
-        App["app (Spring Boot 컨테이너)"]
-        DB[("db (PostgreSQL 15 컨테이너)")]
-        PgAdmin["pgadmin (pgAdmin4 컨테이너)"]
+        App["app (Spring Boot)"]
+        DB[("db (PostgreSQL 15)")]
+        PgAdmin["pgadmin (pgAdmin4)"]
     end
 
-    User -->|Port 8080| App
-    User -->|Port 5050| PgAdmin
-    App -->|내부망 통신: 5432| DB
-    PgAdmin -->|내부망 통신: 5432| DB
+    User -->|":8080"| App
+    User -->|":5050"| PgAdmin
+    App -->|"5432 (Internal)"| DB
+    PgAdmin -->|"5432 (Internal)"| DB
+
+    %% Style Definitions (Pastel Theme)
+    style User fill:#FFF2CC,stroke:#D6B656,stroke-width:2px;
+    style App fill:#DAE8FC,stroke:#6C8EBF,stroke-width:2px;
+    style DB fill:#D5E8D4,stroke:#82B366,stroke-width:2px;
+    style PgAdmin fill:#E1D5E7,stroke:#9673A6,stroke-width:2px;
+    
+    style Host fill:#F5F5F5,stroke:#CCCCCC,stroke-width:1px,stroke-dasharray: 5 5;
+    style Network fill:#F9F9F9,stroke:#B3B3B3,stroke-width:1px;
 ```
 
 * **`db` (PostgreSQL)**: 메인 데이터베이스. `postgres_data` 볼륨을 통해 컨테이너가 재시작되어도 데이터가 영구적으로 보존됩니다.
