@@ -26,6 +26,13 @@ services:
       - db
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    container_name: bedrock-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
   app:
     build: .
     container_name: bedrock-app
@@ -37,8 +44,11 @@ services:
       - DB_NAME=${DB_NAME}
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     depends_on:
       - db
+      - redis
     restart: unless-stopped
 
 volumes:
