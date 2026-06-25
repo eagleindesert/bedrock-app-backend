@@ -18,14 +18,22 @@ function Invoke-Api {
         [string]$CookieFile
     )
     $tmpOut = New-TemporaryFile
+    $tmpBody = $null
     $curlArgs = @('-s', '-o', $tmpOut.FullName, '-w', '%{http_code}', '-X', $Method, $Url)
     if ($UseCookies) { $curlArgs += @('-b', $CookieFile) }
     if ($SaveCookies) { $curlArgs += @('-c', $CookieFile) }
-    if ($Body) { $curlArgs += @('-H', 'Content-Type: application/json', '-d', $Body.Replace('"', '\"')) }
+    if ($Body) {
+        # JSON 값에 공백이 포함되면 PowerShell -> curl.exe 인자 전달 시 본문이 잘리는 문제가 있어
+        # 본문을 임시 파일에 써서 -d @file 형태로 전달한다.
+        $tmpBody = New-TemporaryFile
+        [System.IO.File]::WriteAllText($tmpBody.FullName, $Body, [System.Text.Encoding]::UTF8)
+        $curlArgs += @('-H', 'Content-Type: application/json', '-d', "@$($tmpBody.FullName)")
+    }
 
     $status = & curl.exe @curlArgs
     $respBody = Get-Content -Raw $tmpOut.FullName -ErrorAction SilentlyContinue
     Remove-Item $tmpOut.FullName -ErrorAction SilentlyContinue
+    if ($tmpBody) { Remove-Item $tmpBody.FullName -ErrorAction SilentlyContinue }
     [PSCustomObject]@{ Status = [int]$status; Body = $respBody }
 }
 
