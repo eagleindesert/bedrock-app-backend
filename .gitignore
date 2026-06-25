@@ -38,3 +38,9 @@ out/
 
 ### Environment Variables ###
 .env
+
+### Dummies ###
+dummies/
+
+### API test scripts ###
+scripts/cookies-*.txt

@@ -14,7 +14,7 @@ public class DebugController {
     private final DebugService debugService;
 
     @PostMapping
-    public ResponseEntity<DebugEntity> testDbConnection(@RequestParam String message) {
+    public ResponseEntity<DebugEntity> testDbConnection(@RequestParam("message") String message) {
         DebugEntity saved = debugService.saveMessage(message);
         return ResponseEntity.ok(saved);
     }
