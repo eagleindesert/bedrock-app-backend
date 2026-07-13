@@ -12,6 +12,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -30,6 +32,23 @@ public class ItemService {
         return ItemResponse.from(itemRepository.save(item));
     }
 
+    @Transactional
+    public ItemResponse createInCollection(
+            Long ownerId,
+            UUID collectionId,
+            Set<String> blockCodes,
+            String name,
+            Map<String, Object> attributes
+    ) {
+        Item item = Item.builder()
+                .name(name)
+                .ownerId(ownerId)
+                .collectionId(collectionId)
+                .blockCodes(blockCodes)
+                .attributes(attributes)
+                .build();
+        return ItemResponse.from(itemRepository.save(item));
+    }
     @Transactional(readOnly = true)
     public List<ItemResponse> findAll(Long ownerId) {
         return itemRepository.findByOwnerId(ownerId).stream()
