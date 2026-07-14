@@ -1,0 +1,41 @@
+No,Category,Method,Endpoint,용도,완성 여부,담당자,Module,관련 B_ID,비고,인증
+1,Auth,POST,/api/v1/auth/signup,회원가입 (이메일·비밀번호·이름),O,Hanse Lee,,,,불필요
+2,Auth,POST,/api/v1/auth/login,로그인 (이메일+비밀번호 또는 OAuth),O,Hanse Lee,,,,불필요
+3,Auth,POST,/api/v1/auth/refresh,토큰 갱신 (쿠키 세션 방식이라 필요 X),X,,,,,Refresh
+4,Auth,POST,/api/v1/auth/logout,로그아웃 (토큰 폐기),O,Hanse Lee,,,,Bearer
+5,User,GET,/api/v1/users/me,내 정보 조회,X,Hanse Lee,,,email·name·role 반환,Bearer
+6,User,PATCH,/api/v1/users/me,내 정보 수정,X,Hanse Lee,,,name 등 프로필,Bearer
+7,Item,GET,/api/v1/items,아이템 목록 (attrs 필터),O,Hanse Lee,,,"?attrs.{key}.{op}=&cursor=. AND 결합, op 8종",Bearer
+8,Item,POST,/api/v1/items,아이템 생성,O,Hanse Lee,,,"body: {name, attributes, collection_id?}",Bearer
+9,Item,GET,/api/v1/items/{id},아이템 단건 조회,O,Hanse Lee,,,,Bearer
+10,Item,PUT,/api/v1/items/{id},아이템 수정 (JSONB 머지),O,Hanse Lee,,,attributes = attributes || $1::jsonb 통째 교체 금지,Bearer
+11,Item,DELETE,/api/v1/items/{id},아이템 삭제 (soft delete),O,Hanse Lee,,,deleted_at 갱신만,Bearer
+12,Item,POST,/api/v1/items:bulkCreate,대량 생성,X,,,,body: {items:[...]}. 시간표 인스턴스화에 필수. 전체 atomic,Bearer
+13,Item,PATCH,/api/v1/items:bulkUpdate,대량 수정,X,,,,"body: {updates:[{id, attributes_patch}]}. 전체 atomic",Bearer
+14,Item,DELETE,/api/v1/items:bulkDelete,대량 삭제,X,,,,body: {ids:[...]}. 전체 atomic,Bearer
+15,ItemLink,GET,/api/v1/items/{id}/links,아이템 링크 목록 (양방향),X,,memo,B-004,메모 위키링크 백링크 조회,Bearer
+16,ItemLink,POST,/api/v1/items/{id}/links,링크 생성,X,,,,link_type: reference / parent_child / derived_from,Bearer
+17,ItemLink,DELETE,/api/v1/links/{id},링크 삭제,X,,,,,Bearer
+18,Search,GET,/api/v1/items:countByDate,일별 카운트 (잔디),X,,dashboard,,?attrs.status.eq=done&from=&to=&date_field=updated_at,Bearer
+19,Search,GET,/api/v1/items:search,풀텍스트 검색 (MVP LIKE),X,,memo,B-004,?q=&attrs.content.exists=true. 후기 ts_vector 또는 Meilisearch,Bearer
+20,Action,GET,/api/v1/actions,액션 목록 (프리셋+사용자),O,준표,,,?owner=me&is_preset=&cursor=,Bearer
+21,Action,POST,/api/v1/actions,액션 생성 (steps 포함),△,준표,,,"프리셋은 admin만, 사용자 생성은 중기 개방",Bearer
+22,Action,GET,/api/v1/actions/{id},액션 단건 (블럭 시퀀스 포함),O,준표,,,,Bearer
+23,Action,PATCH,/api/v1/actions/{id},액션 수정,△,준표,,,프리셋은 admin만,Bearer
+24,Action,DELETE,/api/v1/actions/{id},액션 삭제,△,준표,,,"프리셋은 admin만, soft delete",Bearer
+25,Action,POST,/api/v1/actions/{id}/execute,액션 실행 (C 하이브리드),O,준표,,B-001~B-004,"body: {context, trigger_meta}. 시맨틱 변환은 프론트 블럭 책임. 상세 §4",Bearer
+26,Collection,GET,/api/v1/collections,컬렉션 목록 (kind 필터),O,은빈,,,?kind=calendar/notebook/semester&owner=me,Bearer
+27,Collection,POST,/api/v1/collections,컬렉션 생성,O,은빈,,,"body: {kind, name, color, icon, attributes}. collection_users 자동 INSERT (role=owner)",Bearer
+28,Collection,GET,/api/v1/collections/{id},컬렉션 단건,O,,,,,Bearer
+29,Collection,PATCH,/api/v1/collections/{id},컬렉션 수정,O,,,,kind=semester의 attributes.start_date/end_date 변경 시 인스턴스 재생성 고려,Bearer
+30,Collection,DELETE,/api/v1/collections/{id},컬렉션 삭제,O,,,,소속 items + (kind=semester면) derived_from 인스턴스 cascade (응용 트랜잭션),Bearer
+31,Collection,GET,/api/v1/collections/{id}/users,소속 사용자 조회,O,,,,role + system_purpose 명시,Bearer
+32,Collection,POST,/api/v1/collections/{id}/users,사용자 추가,△,,,,MVP는 owner만 (생성 시 자동). editor/viewer는 후기 공유,Bearer
+33,Collection,DELETE,/api/v1/collections/{id}/users/{user_id},사용자 제거,△,,,,후기 공유,Bearer
+34,ViewConfig,GET,/api/v1/users/me/view-configs,전체 5섹션 반환,O,,,,calendar/todo/memo/timetable/dashboard 모두 반환 (ADR-22),Bearer
+35,ViewConfig,PATCH,/api/v1/users/me/view-configs/{view},섹션별 JSONB 머지,O,,,,"{view} ∈ {calendar, todo, memo, timetable, dashboard}. pinned_*_ids · widgets · current_semester_id 등",Bearer
+36,Meta,GET,/api/v1/meta/views,7뷰 + 트리거 목록,O,,,,정적. 각 뷰의 트리거 명·페이로드 키,Bearer
+37,Meta,GET,/api/v1/meta/blocks,블럭 모드 + 채움 필드,O,,,B-001~B-004,정적. 각 블럭이 채우는 attributes 키·필수 여부,Bearer
+38,Meta,GET,/api/v1/meta/fields,MVP 필드 카탈로그,O,,,,정적. 일정·투두·메모·시간표성 필드,Bearer
+39,File,POST,/api/v1/files/upload,S3 presigned URL 발급,△,,memo,B-004,메모 첨부 용도. MVP 보류,Bearer
+40,ETC,GET,/,홈 화면 (정상 접속 확인용),,,,,홈 화면,불필요
