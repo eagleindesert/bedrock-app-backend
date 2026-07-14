@@ -37,6 +37,9 @@ function Invoke-Api {
 function Write-Result {
     param([string]$Name, [int]$Expected, [PSCustomObject]$Result)
     $ok = $Result.Status -eq $Expected
+    if ($null -ne $global:TestResults) {
+        $global:TestResults += [PSCustomObject]@{ Script = $MyInvocation.ScriptName | Split-Path -Leaf; Name = $Name; Status = $ok }
+    }
     $tag = if ($ok) { "PASS" } else { "FAIL" }
     $color = if ($ok) { "Green" } else { "Red" }
     Write-Host ("[{0}] {1} - expected {2}, got {3}" -f $tag, $Name, $Expected, $Result.Status) -ForegroundColor $color

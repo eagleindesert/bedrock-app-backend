@@ -23,7 +23,6 @@ public class HomeController {
                 <li>POST /api/auth/signup</li>
                 <li>POST /api/auth/login</li>
                 <li>POST /api/auth/logout</li>
-                <li>GET  /api/debug</li>
               </ul>
             </body>
             </html>
