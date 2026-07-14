@@ -17,14 +17,20 @@ function Invoke-Api {
         [string]$CookieFile
     )
     $tmpOut = New-TemporaryFile
+    $tmpBody = $null
     $curlArgs = @('-s', '-o', $tmpOut.FullName, '-w', '%{http_code}', '-X', $Method, $Url)
     if ($UseCookies) { $curlArgs += @('-b', $CookieFile) }
     if ($SaveCookies) { $curlArgs += @('-c', $CookieFile) }
-    if ($Body) { $curlArgs += @('-H', 'Content-Type: application/json', '-d', $Body.Replace('"', '\"')) }
+    if ($Body) { 
+        $tmpBody = New-TemporaryFile
+        [System.IO.File]::WriteAllText($tmpBody.FullName, $Body, [System.Text.Encoding]::UTF8)
+        $curlArgs += @('-H', 'Content-Type: application/json', '-d', "@$($tmpBody.FullName)") 
+    }
 
     $status = & curl.exe @curlArgs
     $respBody = Get-Content -Raw $tmpOut.FullName -ErrorAction SilentlyContinue
     Remove-Item $tmpOut.FullName -ErrorAction SilentlyContinue
+    if ($tmpBody) { Remove-Item $tmpBody.FullName -ErrorAction SilentlyContinue }
     [PSCustomObject]@{ Status = [int]$status; Body = $respBody }
 }
 
