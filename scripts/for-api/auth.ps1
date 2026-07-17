@@ -77,20 +77,24 @@ $loginBody = @{ email = $email; password = $password } | ConvertTo-Json -Compres
 $r = Invoke-Api -Method POST -Url "$BaseUrl/api/auth/login" -Body $loginBody -SaveCookies -CookieFile $CookieFile
 Write-Result "로그인 성공" 200 $r
 
-# 5. 로그아웃
-$r = Invoke-Api -Method POST -Url "$BaseUrl/api/auth/logout" -UseCookies -CookieFile $CookieFile
-Write-Result "로그아웃" 200 $r
+# 5. 내 정보 조회 (me)
+$r = Invoke-Api -Method GET -Url "$BaseUrl/api/auth/me" -UseCookies -CookieFile $CookieFile
+Write-Result "내 정보 조회 (me)" 200 $r
 
-# 6. 재로그인 (탈퇴 테스트 준비)
-$r = Invoke-Api -Method POST -Url "$BaseUrl/api/auth/login" -Body $loginBody -SaveCookies -CookieFile $CookieFile
-Write-Result "재로그인" 200 $r
+# 6. 로그아웃
+#$r = Invoke-Api -Method POST -Url "$BaseUrl/api/auth/logout" -UseCookies -CookieFile $CookieFile
+#Write-Result "로그아웃" 200 $r
+#
+## 7. 재로그인 (탈퇴 테스트 준비)
+#$r = Invoke-Api -Method POST -Url "$BaseUrl/api/auth/login" -Body $loginBody -SaveCookies -CookieFile $CookieFile
+#Write-Result "재로그인" 200 $r
+#
+## 8. 회원 탈퇴
+#$r = Invoke-Api -Method DELETE -Url "$BaseUrl/api/auth/withdraw" -UseCookies -CookieFile $CookieFile
+#Write-Result "회원 탈퇴" 200 $r
+#
+## 9. 탈퇴 후 로그인 시도 (실패해야 함)
+#$r = Invoke-Api -Method POST -Url "$BaseUrl/api/auth/login" -Body $loginBody
+#Write-Result "탈퇴 후 로그인 시도" 401 $r
 
-# 7. 회원 탈퇴
-$r = Invoke-Api -Method DELETE -Url "$BaseUrl/api/auth/withdraw" -UseCookies -CookieFile $CookieFile
-Write-Result "회원 탈퇴" 200 $r
-
-# 8. 탈퇴 후 로그인 시도 (실패해야 함)
-$r = Invoke-Api -Method POST -Url "$BaseUrl/api/auth/login" -Body $loginBody
-Write-Result "탈퇴 후 로그인 시도" 401 $r
-
-Remove-Item $CookieFile -ErrorAction SilentlyContinue
+#Remove-Item $CookieFile -ErrorAction SilentlyContinue

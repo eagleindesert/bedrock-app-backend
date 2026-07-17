@@ -53,7 +53,20 @@ curl.exe -i -c cookies.txt -X POST "http://localhost:8080/api/auth/login" `
 
 ---
 
-## 3. 로그아웃 — `POST /api/auth/logout`
+## 3. 내 정보 조회 — `GET /api/auth/me`
+
+- 인증: 필요 (세션 쿠키)
+- 성공: `200 OK` + 내 정보(JSON)
+- 실패: `401`
+
+### curl (PowerShell)
+```powershell
+curl.exe -i -b cookies.txt "http://localhost:8080/api/auth/me"
+```
+
+---
+
+## 4. 로그아웃 — `POST /api/auth/logout`
 
 - 인증: 필요 (세션 쿠키)
 - Body: 없음
@@ -66,7 +79,7 @@ curl.exe -i -b cookies.txt -X POST "http://localhost:8080/api/auth/logout"
 
 ---
 
-## 4. 회원 탈퇴 — `DELETE /api/auth/withdraw`
+## 5. 회원 탈퇴 — `DELETE /api/auth/withdraw`
 
 - 인증: 필요 (세션 쿠키)
 - Body: 없음

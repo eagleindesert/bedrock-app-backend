@@ -5,6 +5,7 @@ import com.bedrock.app.auth.domain.user.User;
 import com.bedrock.app.auth.domain.user.UserRepository;
 import com.bedrock.app.auth.dto.request.LoginRequest;
 import com.bedrock.app.auth.dto.request.SignupRequest;
+import com.bedrock.app.auth.dto.response.MeResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -45,6 +46,13 @@ public class AuthService {
 
         user.updateLastLogin();
         return user;
+    }
+
+    @Transactional(readOnly = true)
+    public MeResponse getMe(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+        return MeResponse.from(user);
     }
 
     @Transactional

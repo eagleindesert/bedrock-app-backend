@@ -3,6 +3,7 @@ package com.bedrock.app.auth.controller;
 import com.bedrock.app.auth.domain.user.User;
 import com.bedrock.app.auth.dto.request.LoginRequest;
 import com.bedrock.app.auth.dto.request.SignupRequest;
+import com.bedrock.app.auth.dto.response.MeResponse;
 import com.bedrock.app.auth.service.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
@@ -50,7 +51,21 @@ public class AuthController {
         HttpSession session = httpRequest.getSession(true);
         session.setAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, sc);
 
+        // 디버깅/가시성용: userId 를 세션에 단순 값으로 직접 저장 (인증에는 사용 안 함)
+        // → Redis 뷰어에서 sessionAttr:userId 필드로 값이 그대로 보임
+        session.setAttribute("userId", user.getId());
+
         return ResponseEntity.ok().build();
+    }
+
+    @GetMapping("/me")
+    public ResponseEntity<MeResponse> getMe() {
+        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        if (principal instanceof Long userId) {
+            MeResponse response = authService.getMe(userId);
+            return ResponseEntity.ok(response);
+        }
+        return ResponseEntity.status(401).build();
     }
 
     @PostMapping("/logout")
