@@ -40,14 +40,14 @@ class ActionServiceExecutionTest {
     }
 
     @Test
-    void executeMergesDefaultPrefillAndInputThenReturnsFullItem() {
+    void executeMergesDefaultTriggerPayloadAndInputThenReturnsFullItem() {
         UUID actionId = UUID.randomUUID();
         UUID collectionId = UUID.randomUUID();
         UUID itemId = UUID.randomUUID();
         Action action = todoAction(actionId, true);
         ItemResponse item = new ItemResponse(
                 itemId,
-                "캡스톤 발표자료 준비",
+                null,
                 17L,
                 collectionId,
                 Set.of("TODO"),
@@ -67,7 +67,6 @@ class ActionServiceExecutionTest {
                 eq(17L),
                 eq(collectionId),
                 anySet(),
-                anyString(),
                 anyMap()
         )).thenReturn(item);
 
@@ -95,11 +94,11 @@ class ActionServiceExecutionTest {
                 eq(17L),
                 eq(collectionId),
                 eq(Set.of("TODO")),
-                eq("캡스톤 발표자료 준비"),
                 attributesCaptor.capture()
         );
 
         assertThat(attributesCaptor.getValue())
+                .containsEntry("title", "캡스톤 발표자료 준비")
                 .containsEntry("priority", "P1")
                 .containsEntry("dueDate", "2026-04-28")
                 .containsEntry("completed", false)
@@ -108,10 +107,11 @@ class ActionServiceExecutionTest {
         assertThat(response.itemId()).isEqualTo(itemId);
         assertThat(response.status()).isEqualTo(ActionResponse.Execution.Status.COMPLETED);
         assertThat(response.item()).isEqualTo(item);
+        assertThat(response.item().name()).isNull();
     }
 
     @Test
-    void prefillOverridesDefaultWhenUserDoesNotChangeTheField() {
+    void triggerPayloadOverridesDefaultWhenUserDoesNotChangeTheField() {
         UUID actionId = UUID.randomUUID();
         UUID collectionId = UUID.randomUUID();
         when(actionRepository.findVisibleById(actionId, 17L))
@@ -120,7 +120,6 @@ class ActionServiceExecutionTest {
                 eq(17L),
                 eq(collectionId),
                 anySet(),
-                anyString(),
                 anyMap()
         )).thenReturn(createdItem(collectionId));
 
@@ -141,7 +140,6 @@ class ActionServiceExecutionTest {
                 eq(17L),
                 eq(collectionId),
                 eq(Set.of("TODO")),
-                eq("사용자 입력 제목"),
                 attributesCaptor.capture()
         );
         assertThat(attributesCaptor.getValue())
@@ -164,7 +162,6 @@ class ActionServiceExecutionTest {
                 eq(17L),
                 eq(collectionId),
                 anySet(),
-                anyString(),
                 anyMap()
         )).thenReturn(createdItem(collectionId));
 
@@ -185,7 +182,6 @@ class ActionServiceExecutionTest {
                 eq(17L),
                 eq(collectionId),
                 eq(Set.of("TODO", "MEMO")),
-                eq("복합 아이템"),
                 anyMap()
         );
     }
@@ -431,7 +427,7 @@ class ActionServiceExecutionTest {
         LocalDateTime now = LocalDateTime.of(2026, 4, 9, 12, 0);
         return new ItemResponse(
                 UUID.randomUUID(),
-                "사용자 입력 제목",
+                null,
                 17L,
                 collectionId,
                 Set.of("TODO"),

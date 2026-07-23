@@ -37,11 +37,9 @@ public class ItemService {
             Long ownerId,
             UUID collectionId,
             Set<String> blockCodes,
-            String name,
             Map<String, Object> attributes
     ) {
         Item item = Item.builder()
-                .name(name)
                 .ownerId(ownerId)
                 .collectionId(collectionId)
                 .blockCodes(blockCodes)

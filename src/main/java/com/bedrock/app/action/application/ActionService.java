@@ -144,7 +144,7 @@ public class ActionService {
         List<BlockCode> blockCodes = getOrderedBlockCodes(action);
         Map<String, Object> attributes = resolveItemAttributes(
                 blockCodes,
-                request.prefill(),
+                request.triggerPayload(),
                 request.input()
         );
 
@@ -152,7 +152,6 @@ public class ActionService {
                 ownerId,
                 request.targetCollectionId(),
                 toItemBlockCodeNames(blockCodes),
-                (String) attributes.get("title"),
                 attributes
         );
         return new ActionResponse.Execution(
@@ -226,20 +225,25 @@ public class ActionService {
 
     private Map<String, Object> resolveItemAttributes(
             List<BlockCode> blockCodes,
-            Map<String, Object> prefill,
+            Map<String, Object> triggerPayload,
             Map<String, Object> input
     ) {
         LinkedHashMap<String, BlockCatalog.Field> fieldsByKey =
                 indexFieldsByKey(blockCodes);
 
-        Map<String, Object> safePrefill = prefill == null ? Map.of() : prefill;
+        Map<String, Object> safeTriggerPayload =
+                triggerPayload == null ? Map.of() : triggerPayload;
         Map<String, Object> safeInput = input == null ? Map.of() : input;
-        rejectUnknownFields(fieldsByKey.keySet(), safePrefill, "prefill");
+        rejectUnknownFields(
+                fieldsByKey.keySet(),
+                safeTriggerPayload,
+                "triggerPayload"
+        );
         rejectUnknownFields(fieldsByKey.keySet(), safeInput, "input");
 
         LinkedHashMap<String, Object> attributes = mergeInputValues(
                 fieldsByKey.values(),
-                safePrefill,
+                safeTriggerPayload,
                 safeInput
         );
         for (BlockCatalog.Field field : fieldsByKey.values()) {
@@ -262,7 +266,7 @@ public class ActionService {
 
     private LinkedHashMap<String, Object> mergeInputValues(
             Collection<BlockCatalog.Field> fields,
-            Map<String, Object> prefill,
+            Map<String, Object> triggerPayload,
             Map<String, Object> input
     ) {
         LinkedHashMap<String, Object> values = new LinkedHashMap<>();
@@ -271,7 +275,7 @@ public class ActionService {
                 values.put(field.key(), field.defaultValue());
             }
         }
-        values.putAll(prefill);
+        values.putAll(triggerPayload);
         values.putAll(input);
         return values;
     }

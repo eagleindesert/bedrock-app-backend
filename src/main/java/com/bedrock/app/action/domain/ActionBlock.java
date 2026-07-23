@@ -9,6 +9,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
@@ -22,10 +23,20 @@ import java.util.UUID;
 @Entity
 @Table(
         name = "action_steps",
-        uniqueConstraints = @UniqueConstraint(
-                name = "uk_action_steps_action_block",
-                columnNames = {"action_id", "block_code"}
-        )
+        indexes = @Index(
+                name = "idx_action_steps_action",
+                columnList = "action_id, display_order"
+        ),
+        uniqueConstraints = {
+                @UniqueConstraint(
+                        name = "uk_action_steps_action_block",
+                        columnNames = {"action_id", "block_code"}
+                ),
+                @UniqueConstraint(
+                        name = "uk_action_steps_action_display_order",
+                        columnNames = {"action_id", "display_order"}
+                )
+        }
 )
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)

@@ -1,6 +1,7 @@
 package com.bedrock.app.action.dto;
 
 import com.bedrock.app.action.domain.type.BlockCode;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -43,7 +44,7 @@ public final class ActionRequests {
 
     public record Execute(
             @NotNull UUID targetCollectionId,
-            Map<String, Object> prefill,
+            @JsonAlias("prefill") Map<String, Object> triggerPayload,
             Map<String, Object> input
     ) {
     }

@@ -74,7 +74,7 @@ TODO Block은 다음 필드를 제공한다.
 
     {
       "targetCollectionId": "835c78c3-8d10-4f26-a40b-9c8cf0599886",
-      "prefill": {
+      "triggerPayload": {
         "title": "캡스톤 발표자료 준비"
       },
       "input": {
@@ -89,9 +89,9 @@ TODO Block은 다음 필드를 제공한다.
 
 입력 병합 우선순위는 다음과 같다.
 
-    Block 기본값 < prefill < input
+    Block 기본값 < triggerPayload < input
 
-prefill은 빠른 입력 제목이나 캘린더에서 선택한 날짜처럼 입력 화면을 미리 채우는 값이다. GET Action 응답에서 내려오는 값이 아니라 현재 View 문맥을 아는 프론트가 execute 요청에 넣는다. Action을 선택하는 키가 아니다. input은 사용자가 최종 확정한 값이며 같은 필드가 있으면 prefill보다 우선한다.
+triggerPayload는 빠른 입력 제목이나 캘린더에서 선택한 날짜처럼 트리거가 발생한 View의 문맥으로 입력 화면을 미리 채우는 값이다. GET Action 응답에서 내려오는 값이 아니라 현재 View 문맥을 아는 프론트가 execute 요청에 넣는다. Action을 선택하는 키가 아니다. input은 사용자가 최종 확정한 값이며 같은 필드가 있으면 triggerPayload보다 우선한다.
 
 성공 응답은 당분간 생성된 Item 전체를 포함한다.
 
@@ -101,7 +101,7 @@ prefill은 빠른 입력 제목이나 캘린더에서 선택한 날짜처럼 입
       "status": "COMPLETED",
       "item": {
         "id": "item-uuid",
-        "name": "캡스톤 발표자료 준비",
+        "name": null,
         "ownerId": 17,
         "collectionId": "835c78c3-8d10-4f26-a40b-9c8cf0599886",
         "blockCodes": ["TODO"],
@@ -120,12 +120,14 @@ prefill은 빠른 입력 제목이나 캘린더에서 선택한 날짜처럼 입
 
 생성 후 화면 유지, 이동, 완료 모달, 실행 취소 UI는 Action을 호출한 프론트가 결정한다. itemId로 Item DELETE를 호출해 실행 결과를 취소할 수 있다.
 
+Action 실행은 특정 속성을 Item의 대표 필드로 자동 추론하지 않는다. 따라서 title은 attributes에만 저장되며 Item.name으로 자동 복사되지 않는다.
+
 ## 6. 프론트 호출 흐름
 
 1. View의 버튼이나 메뉴가 연결된 actionId를 확인한다.
 2. GET /api/v1/actions/{actionId}로 입력 폼 정의를 가져온다.
 3. blocks와 inputFields를 이용해 하나의 입력 화면을 표시한다.
-4. prefill과 사용자의 최종 input을 execute 요청으로 보낸다.
+4. triggerPayload와 사용자의 최종 input을 execute 요청으로 보낸다.
 5. 응답의 Item으로 목록과 상세 화면을 갱신한다.
 
 사용자가 View 이벤트와 Action 연결을 직접 편집하는 기능이 필요해지면 Action에 Trigger를 다시 넣지 않고 별도의 ActionBinding(view, event, actionId) 모델을 추가한다.
