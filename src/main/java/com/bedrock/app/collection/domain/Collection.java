@@ -62,11 +62,24 @@ public class Collection {
         this.attributes = attributes != null ? attributes : new HashMap<>();
     }
 
-    public void update(String name, String color, String icon, Map<String, Object> attributes) {
-        this.name = name;
-        this.color = color;
-        this.icon = icon;
-        this.attributes = attributes != null ? attributes : new HashMap<>();
+    /**
+     * PATCH 부분 수정 — null인 필드는 건드리지 않고, attributes는 통째 교체가 아니라 병합한다.
+     * (kind=semester인 컬렉션의 attributes.start_date/end_date가 바뀌는 경우 인스턴스 재생성이
+     * 필요할 수 있으나, 이는 후속 작업으로 별도 처리한다.)
+     */
+    public void applyPatch(String name, String color, String icon, Map<String, Object> attributesPatch) {
+        if (name != null) {
+            this.name = name;
+        }
+        if (color != null) {
+            this.color = color;
+        }
+        if (icon != null) {
+            this.icon = icon;
+        }
+        if (attributesPatch != null) {
+            this.attributes.putAll(attributesPatch);
+        }
     }
 
     public void delete() {

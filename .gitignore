@@ -44,3 +44,6 @@ dummies/
 
 ### API test scripts ###
 scripts/cookies-*.txt
+
+### macOS ###
+.DS_Store

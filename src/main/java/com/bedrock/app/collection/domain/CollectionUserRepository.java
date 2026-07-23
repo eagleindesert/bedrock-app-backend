@@ -6,9 +6,15 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-public interface CollectionUserRepository extends JpaRepository<CollectionUser, UUID> {
+public interface CollectionUserRepository extends JpaRepository<CollectionUser, CollectionUserId> {
 
     List<CollectionUser> findByUserId(Long userId);
 
+    List<CollectionUser> findByCollectionId(UUID collectionId);
+
     Optional<CollectionUser> findByCollectionIdAndUserId(UUID collectionId, Long userId);
+
+    long countByCollectionIdAndRole(UUID collectionId, CollectionRole role);
+
+    void deleteByCollectionId(UUID collectionId);
 }
