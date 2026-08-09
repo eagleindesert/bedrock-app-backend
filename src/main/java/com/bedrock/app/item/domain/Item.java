@@ -14,7 +14,9 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Entity
@@ -35,6 +37,13 @@ public class Item {
     @Column(name = "owner_id", nullable = false)
     private Long ownerId;
 
+    @Column(name = "collection_id")
+    private UUID collectionId;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "block_codes", columnDefinition = "jsonb")
+    private Set<String> blockCodes = new LinkedHashSet<>();
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(nullable = false, columnDefinition = "jsonb")
     private Map<String, Object> attributes = new HashMap<>();
@@ -49,10 +58,22 @@ public class Item {
     private LocalDateTime deletedAt;
 
     @Builder
-    public Item(String name, Long ownerId, Map<String, Object> attributes) {
+    public Item(
+            String name,
+            Long ownerId,
+            UUID collectionId,
+            Set<String> blockCodes,
+            Map<String, Object> attributes
+    ) {
         this.name = name;
         this.ownerId = ownerId;
-        this.attributes = attributes != null ? attributes : new HashMap<>();
+        this.collectionId = collectionId;
+        this.blockCodes = blockCodes == null
+                ? new LinkedHashSet<>()
+                : new LinkedHashSet<>(blockCodes);
+        this.attributes = attributes == null
+                ? new HashMap<>()
+                : new HashMap<>(attributes);
     }
 
     public void update(String name, Map<String, Object> attributes) {
