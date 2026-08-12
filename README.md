@@ -22,5 +22,6 @@ docker-compose up -d --build
 
 ## 📂 Documentation
 
+* **Swagger UI (API 문서 및 테스트)**: 애플리케이션 실행 후 `http://localhost:8080/swagger-ui.html`
 * [시스템 설계서 (docs/architecture.md)](docs/architecture.md)
 * [실행 및 PR 가이드 (docs/guide.md)](docs/guide.md)

@@ -50,7 +50,14 @@ docker-compose up -d --build
 ### 2-2. 접속 확인
 
 - **Spring Boot API**: `http://localhost:8080`
+- **Swagger UI (API 문서)**: `http://localhost:8080/swagger-ui.html`
 - **pgAdmin (DB 모니터링)**: `http://localhost:5050` (로그인 정보는 `.env`의 `PGADMIN_EMAIL`, `PGADMIN_PASSWORD` 사용)
+
+### 2-4. Swagger UI 사용법
+
+- 브라우저에서 `http://localhost:8080/swagger-ui.html` 접속 (OpenAPI 문서 원본은 `/v3/api-docs`)
+- 인증이 필요한 API를 호출하려면 **`Auth > POST /api/auth/login`을 먼저 실행**합니다. 응답의 `SESSION` 쿠키가 브라우저에 저장되어 이후 요청에 자동으로 전송됩니다.
+- 문서를 끄려면 `.env`(또는 컨테이너 환경변수)에 `SWAGGER_ENABLED=false`를 추가합니다. 운영 배포 시에는 이 값을 `false`로 두는 것을 권장합니다.
 
 ### 2-3. 서비스 종료
 

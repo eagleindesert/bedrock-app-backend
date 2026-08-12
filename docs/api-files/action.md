@@ -1,5 +1,8 @@
 # Action API
 
+> 요청/응답 스키마의 최신 기준은 Swagger UI(`http://localhost:8080/swagger-ui.html`)입니다.
+> 이 문서는 Action 의 개념과 실행 흐름 설명을 담습니다.
+
 ## 1. 역할
 
 - Item: 사용자가 만든 실제 데이터 한 건이다.
