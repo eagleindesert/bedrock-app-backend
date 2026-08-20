@@ -69,11 +69,48 @@ docker-compose down
 
 ---
 
-## 3. 깃허브 PR (Pull Request) 가이드 🤝
+## 3. DB 스키마 변경 가이드 (Flyway) 🗄️
+
+DB 스키마는 **Flyway 마이그레이션으로만** 변경합니다. Hibernate는 `spring.jpa.hibernate.ddl-auto=validate`로
+설정되어 있어 엔티티와 실제 테이블이 다르면 애플리케이션이 아예 기동되지 않습니다.
+
+### 3-1. 마이그레이션 파일 작성
+
+엔티티(`@Entity`)를 추가하거나 컬럼을 바꿨다면, 같은 PR에 마이그레이션 파일을 함께 추가합니다.
+
+```text
+src/main/resources/db/migration/
+├── V1__init.sql                       ◀ 베이스라인 스키마
+├── V2__align_action_schema.sql
+├── V3__normalize_constraint_names.sql
+└── V4__{작업_내용}.sql                 ◀ 새 파일은 여기에
+```
+
+- 파일명 규칙: `V{다음_번호}__{스네이크_케이스_설명}.sql` (밑줄 **두 개**)
+- 버전 번호는 팀에서 이미 사용된 가장 큰 번호 + 1을 씁니다.
+
+### 3-2. 지켜야 할 규칙
+
+- **이미 적용된 마이그레이션 파일은 절대 수정하지 않습니다.** Flyway가 체크섬을 검증하기 때문에
+  파일을 고치면 다른 팀원의 애플리케이션이 기동에 실패합니다. 잘못된 내용은 새 버전 파일로 바로잡습니다.
+- 애플리케이션은 기동 시 자동으로 마이그레이션을 적용합니다. 별도 명령은 필요 없습니다.
+- 적용 이력은 `flyway_schema_history` 테이블에서 확인할 수 있습니다.
+
+```bash
+docker exec bedrock-postgres psql -U $DB_USER -d $DB_NAME \
+  -c "select version, description, success from flyway_schema_history order by installed_rank"
+```
+
+> 기존에 `ddl-auto=update`로 만들어진 DB는 `baseline-on-migrate` 설정에 의해 V1이 자동으로
+> 건너뛰어지므로, 데이터를 지우지 않아도 그대로 사용할 수 있습니다.
+
+---
+
+## 4. 깃허브 PR (Pull Request) 가이드 🤝
 
 현재 저장소의 `main` 브랜치는 **Branch Protection Rule**이 적용되어 있어 직접 Push할 수 없습니다. 모든 코드 변경 사항은 아래 절차를 통해 PR을 거쳐야 합니다.
 
-### 3-1. 브랜치 생성 및 작업
+### 4-1. 브랜치 생성 및 작업
 
 ```bash
 # 최신 메인 브랜치 가져오기
@@ -84,7 +121,7 @@ git pull origin main
 git checkout -b feature/작업내용
 ```
 
-### 3-2. 커밋 및 푸시
+### 4-2. 커밋 및 푸시
 
 작업을 마친 후 변경 사항을 커밋하고 푸시합니다.
 
@@ -94,7 +131,7 @@ git commit -m "feat: 새로운 기능 추가"
 git push -u origin feature/작업내용
 ```
 
-### 3-3. Pull Request 생성 및 병합(Merge)
+### 4-3. Pull Request 생성 및 병합(Merge)
 
 1. GitHub 저장소 페이지에 들어가면 `Compare & pull request` 버튼이 뜹니다.
 2. PR 제목과 작업 내용을 상세히 적어 생성합니다.
