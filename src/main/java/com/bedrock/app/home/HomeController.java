@@ -1,9 +1,12 @@
 package com.bedrock.app.home;
 
+import io.swagger.v3.oas.annotations.Hidden;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+// API 가 아닌 HTML 랜딩 페이지이므로 OpenAPI 문서에서 제외
+@Hidden
 @RestController
 public class HomeController {
 

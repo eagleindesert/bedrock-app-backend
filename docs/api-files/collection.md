@@ -1,5 +1,7 @@
 # Collection API 테스트 (`/api/v1/collections`)
 
+> 요청/응답 스키마의 최신 기준은 Swagger UI(`http://localhost:8080/swagger-ui.html`)입니다.
+
 모든 엔드포인트는 **인증 필요**(세션 쿠키). 컬렉션 생성 시 요청한 사용자가 `collection_users`에 `role=owner`로 자동 등록되며,
 목록 조회는 **내가 속한(collection_users에 내가 등록된) 컬렉션만** 반환한다.
 먼저 [auth.md](auth.md)의 로그인으로 `cookies.txt`를 만든 뒤 `-b cookies.txt`로 호출한다.

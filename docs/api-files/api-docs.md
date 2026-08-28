@@ -1,5 +1,7 @@
 # Auth API 테스트 (`/api/auth`)
 
+> 요청/응답 스키마의 최신 기준은 Swagger UI(`http://localhost:8080/swagger-ui.html`)입니다.
+
 세션 기반 인증. 로그인 성공 시 `SESSION` 쿠키가 발급되며, 이후 인증이 필요한 요청은 이 쿠키를 함께 보내야 한다.
 CSRF는 비활성화되어 있어 별도 토큰이 필요 없다.
 

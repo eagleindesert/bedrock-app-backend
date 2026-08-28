@@ -19,6 +19,12 @@ Write-Host "=========================================" -ForegroundColor Cyan
 
 Write-Host ""
 Write-Host "=========================================" -ForegroundColor Cyan
+Write-Host "Running collection.ps1" -ForegroundColor Cyan
+Write-Host "=========================================" -ForegroundColor Cyan
+& (Join-Path $PSScriptRoot "collection.ps1")
+
+Write-Host ""
+Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host "Test Summary" -ForegroundColor Cyan
 Write-Host "=========================================" -ForegroundColor Cyan
 
