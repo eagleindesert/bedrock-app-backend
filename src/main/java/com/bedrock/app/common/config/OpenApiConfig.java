@@ -10,6 +10,7 @@ import org.springdoc.core.utils.SpringDocUtils;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import com.bedrock.app.common.auth.CurrentUser;
 
 import java.util.List;
 
@@ -20,28 +21,31 @@ public class OpenApiConfig {
     public static final String SESSION_AUTH = "sessionAuth";
 
     static {
-        // @AuthenticationPrincipal Long ownerId 가 쿼리 파라미터로 문서화되는 것을 방지
+        // 인증 주체는 클라이언트가 전달하는 쿼리 파라미터가 아니다.
         SpringDocUtils.getConfig()
-                .addAnnotationsToIgnore(AuthenticationPrincipal.class);
+                .addAnnotationsToIgnore(AuthenticationPrincipal.class, CurrentUser.class);
     }
 
     @Bean
     public OpenAPI bedrockOpenAPI() {
         Info info = new Info()
                 .title("Bedrock App API")
-                .version("v1")
+                .version("v2-common")
                 .description("""
                         Bedrock 백엔드 REST API 문서.
 
-                        인증은 세션 쿠키(SESSION) 방식이다.
-                        `POST /api/auth/login` 을 먼저 실행하면 브라우저에 세션 쿠키가 저장되고,
-                        이후 다른 API 는 별도 설정 없이 그대로 호출할 수 있다.
+                        인증은 BEDROCK_SESSION 쿠키 방식이다.
+                        쓰기 요청 전 GET /api/auth/csrf의 data.token을 X-CSRF-TOKEN 헤더에 넣는다.
+                        현재는 공통 기반 단계이며 가입·로그인·업무 API는 담당 기능 구현에서 추가한다.
+                        BE 1은 인증 성공 후 SessionAuthenticationService를 호출하고 CSRF 토큰을 교체한다.
+                        웹 탭은 X-Bedrock-Account-Id 헤더로 현재 계정 UUID를 전달한다.
+                        JSON 응답은 success/data/error 형식이며 204 응답에는 본문이 없다.
                         """);
 
         SecurityScheme sessionCookie = new SecurityScheme()
                 .type(SecurityScheme.Type.APIKEY)
                 .in(SecurityScheme.In.COOKIE)
-                .name("SESSION")
+                .name("BEDROCK_SESSION")
                 .description("로그인 성공 시 발급되는 세션 쿠키");
 
         return new OpenAPI()

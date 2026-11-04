@@ -1,0 +1,90 @@
+name: bedrock-local
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-${DB_NAME:-bedrock}}
+      POSTGRES_USER: ${DB_USERNAME:-${DB_USER:-bedrock}}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-bedrock}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data_v2:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  pgadmin:
+    image: dpage/pgadmin4
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-local-development-only}
+    ports:
+      - "127.0.0.1:5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:-bedrock}
+    command: [redis-server, --requirepass, '${REDIS_PASSWORD:-bedrock}', --appendonly, 'yes']
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  redisinsight:
+    image: redis/redisinsight:latest
+    ports:
+      - "127.0.0.1:5540:5540"
+    volumes:
+      - redisinsight_data:/data
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  app:
+    profiles: [app]
+    build: .
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=${POSTGRES_DB:-${DB_NAME:-bedrock}}
+      - DB_USER=${DB_USERNAME:-${DB_USER:-bedrock}}
+      - DB_PASSWORD=${DB_PASSWORD:-bedrock}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-bedrock}
+      - COOKIE_SECURE=${COOKIE_SECURE:-false}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - be_logs:/app/logs
+    restart: unless-stopped
+
+volumes:
+  postgres_data_v2:
+  pgadmin_data:
+  redisinsight_data:
+  redis_data:
+  be_logs:

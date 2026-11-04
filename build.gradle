@@ -19,14 +19,21 @@ repositories {
 	mavenCentral()
 }
 
+configurations {
+	proguard
+	mockitoAgent
+}
+
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
-	implementation 'org.springframework.session:spring-session-data-redis'
+	implementation 'org.springframework.boot:spring-boot-starter-session-data-redis'
 	implementation 'org.springframework.boot:spring-boot-starter-security'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
+	implementation 'org.springframework.boot:spring-boot-starter-mail'
+	implementation 'org.bouncycastle:bcprov-jdk18on:1.80'
 	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3'
 	// Boot 4부터 자동설정이 기술별 모듈로 분리되어, spring-boot-flyway 없이는 마이그레이션이 실행되지 않는다.
 	implementation 'org.springframework.boot:spring-boot-flyway'
@@ -39,6 +46,10 @@ dependencies {
 	testImplementation 'org.springframework.boot:spring-boot-starter-actuator-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+	testImplementation 'org.springframework.security:spring-security-test'
+	testImplementation 'org.testcontainers:testcontainers-postgresql'
+	proguard 'com.guardsquare:proguard-base:7.10.0'
+	mockitoAgent('org.mockito:mockito-core') { transitive = false }
 	testCompileOnly 'org.projectlombok:lombok'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 	testAnnotationProcessor 'org.projectlombok:lombok'
@@ -46,4 +57,67 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	// Java 21에서 Mockito가 실행 중 JVM에 자체 attach하지 않도록 미리 로드한다.
+	doFirst { jvmArgs "-javaagent:${configurations.mockitoAgent.singleFile}" }
+}
+
+tasks.named('bootRun') {
+	// 로컬 접속 정보는 .env에서 읽고, 배포 JAR에는 local 프로필을 기본 적용하지 않는다.
+	systemProperty 'spring.profiles.default', 'local'
+	// DevTools의 별도 재시작 스레드가 기동 예외를 삼켜 성공 종료로 보이는 것을 방지한다.
+	systemProperty 'spring.devtools.restart.enabled', 'false'
+}
+
+// 애플리케이션 바이트코드만 난독화한다. Boot 로더와 의존성 JAR는 입력에 넣지 않는다.
+def obfuscatedClasses = layout.buildDirectory.file('obfuscation/classes.jar')
+def obfuscatedDirectory = layout.buildDirectory.dir('obfuscation/classes')
+
+tasks.register('applicationClassesJar', Jar) {
+	dependsOn tasks.named('classes')
+	archiveFileName = 'application-classes.jar'
+	destinationDirectory = layout.buildDirectory.dir('obfuscation')
+	from sourceSets.main.output.classesDirs
+}
+
+tasks.register('obfuscateClasses', JavaExec) {
+	dependsOn tasks.named('applicationClassesJar')
+	classpath = configurations.proguard
+	mainClass = 'proguard.ProGuard'
+	javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+	inputs.file('proguard.pro')
+	inputs.file(tasks.named('applicationClassesJar').flatMap { it.archiveFile })
+	inputs.files(configurations.runtimeClasspath)
+	outputs.file(obfuscatedClasses)
+	outputs.file(layout.buildDirectory.file('obfuscation/mapping.txt'))
+	doFirst {
+		def options = [
+			'@' + file('proguard.pro').absolutePath,
+			'-injars', tasks.named('applicationClassesJar').get().archiveFile.get().asFile.absolutePath,
+			'-outjars', obfuscatedClasses.get().asFile.absolutePath,
+			'-printmapping', layout.buildDirectory.file('obfuscation/mapping.txt').get().asFile.absolutePath
+		]
+		configurations.runtimeClasspath.files.sort().each { dependency ->
+			options.addAll(['-libraryjars', dependency.absolutePath])
+		}
+		fileTree(javaLauncher.get().metadata.installationPath.dir('jmods')).matching {
+			include '*.jmod'
+		}.files.sort().each { module ->
+			options.addAll(['-libraryjars', module.absolutePath + '(!**.jar;!module-info.class)'])
+		}
+		setArgs(options)
+	}
+}
+
+tasks.register('unpackObfuscatedClasses', Sync) {
+	dependsOn tasks.named('obfuscateClasses')
+	from { zipTree(obfuscatedClasses.get().asFile) }
+	into obfuscatedDirectory
+}
+
+tasks.register('bootJarObfuscate', org.springframework.boot.gradle.tasks.bundling.BootJar) {
+	dependsOn tasks.named('unpackObfuscatedClasses'), tasks.named('processResources')
+	archiveFileName = 'app-obfuscated.jar'
+	mainClass = 'com.bedrock.app.AppApplication'
+	classpath = files(obfuscatedDirectory, sourceSets.main.output.resourcesDir) +
+		(configurations.runtimeClasspath - configurations.developmentOnly)
 }

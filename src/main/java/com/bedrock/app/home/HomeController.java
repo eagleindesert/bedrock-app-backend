@@ -23,9 +23,9 @@ public class HomeController {
               <h1>✅ Bedrock App Backend is running</h1>
               <p>이 서버는 REST API 백엔드입니다.</p>
               <ul>
-                <li>POST /api/auth/signup</li>
-                <li>POST /api/auth/login</li>
-                <li>POST /api/auth/logout</li>
+                <li>GET /actuator/health</li>
+                <li>GET /api/auth/csrf</li>
+                <li><a href="/swagger-ui.html">API 문서</a></li>
               </ul>
             </body>
             </html>

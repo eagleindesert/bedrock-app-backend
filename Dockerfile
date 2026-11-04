@@ -1,27 +1,18 @@
-# Stage 1: Build the application
-FROM eclipse-temurin:21-jdk AS builder
-WORKDIR /app
+# syntax=docker/dockerfile:1
+FROM eclipse-temurin:21-jdk-noble AS builder
+WORKDIR /workspace
 
-# Copy gradle wrapper files
-COPY gradlew .
-COPY gradle gradle
-# Copy build configuration files
-COPY build.gradle settings.gradle ./
-# Copy source code
-COPY src src
-
-# Make wrapper executable and build the project
-# Exclude tests during docker build for faster startup
+COPY gradlew settings.gradle build.gradle proguard.pro ./
+COPY gradle ./gradle
 RUN chmod +x ./gradlew
-RUN ./gradlew build -x test --no-daemon
+COPY src ./src
+RUN ./gradlew bootJarObfuscate --no-daemon -x test
 
-# Stage 2: Run the application
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:21-jre-noble
 WORKDIR /app
-
-# Copy the built jar file from the builder stage
-# Spring Boot 3+ typically creates an executable jar ending with -SNAPSHOT.jar or similar
-COPY --from=builder /app/build/libs/*.jar app.jar
-
-# Run the jar file
-ENTRYPOINT ["java", "-jar", "app.jar"]
+RUN groupadd -r appgroup && useradd -r -g appgroup appuser \
+    && mkdir -p /app/logs/archive && chown -R appuser:appgroup /app/logs
+COPY --from=builder /workspace/build/libs/app-obfuscated.jar /app/app.jar
+USER appuser
+EXPOSE 8080
+ENTRYPOINT ["java", "-XX:+UseContainerSupport", "-XX:MaxRAMPercentage=75.0", "-jar", "/app/app.jar"]

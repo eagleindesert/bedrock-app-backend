@@ -48,3 +48,8 @@ scripts/cookies-*.txt
 ### macOS ###
 .DS_Store
 **/.DS_Store
+
+### Runtime logs ###
+logs/
+
+dummies/

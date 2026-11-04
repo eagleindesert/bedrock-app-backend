@@ -1,0 +1,13 @@
+# bootRun의 기본 프로필. 실제 자격 증명을 저장소 설정에 복사하지 않는다.
+spring:
+  config:
+    import: optional:file:${BEDROCK_ENV_FILE:.env}[.properties]
+  data:
+    redis:
+      password: ${REDIS_PASSWORD:bedrock}
+
+server:
+  servlet:
+    session:
+      cookie:
+        secure: ${COOKIE_SECURE:false}

@@ -1,75 +1,62 @@
 package com.bedrock.app.collection.domain;
 
-import jakarta.persistence.*;
+import com.bedrock.app.common.domain.BaseTimeEntity;
+import com.bedrock.app.common.domain.SwatchColor;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 import lombok.AccessLevel;
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.annotations.SQLRestriction;
-import org.hibernate.type.SqlTypes;
-import org.springframework.data.annotation.CreatedDate;
-import org.springframework.data.annotation.LastModifiedDate;
-import org.springframework.data.jpa.domain.support.AuditingEntityListener;
+import org.hibernate.annotations.Generated;
+import org.hibernate.generator.EventType;
 
-import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.Map;
+import java.time.Instant;
 import java.util.UUID;
 
+/** 공통 명세의 collections 저장 모델. 기능별 검증과 변경 연산은 담당 패키지에서 구현한다. */
 @Entity
 @Table(name = "collections")
 @Getter
+@Builder
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-@EntityListeners(AuditingEntityListener.class)
-@SQLRestriction("deleted_at IS NULL")
-public class Collection {
-
+@AllArgsConstructor(access = AccessLevel.PRIVATE)
+public class Collection extends BaseTimeEntity {
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
+    @Column(name = "id", nullable = false)
     private UUID id;
 
+    @Column(name = "user_id", nullable = false)
+    private UUID userId;
+
+    @Column(name = "name_enc", nullable = false, columnDefinition = "text")
+    private String nameEnc;
+
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
-    private CollectionKind kind;
+    @Column(name = "color", nullable = false, length = 20)
+    private SwatchColor color;
 
-    @Column(columnDefinition = "text")
-    private String name;
-
-    private String color;
-
+    @Column(name = "icon", nullable = false, length = 50)
     private String icon;
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(nullable = false, columnDefinition = "jsonb")
-    private Map<String, Object> attributes = new HashMap<>();
+    @Column(name = "is_default", nullable = false)
+    private boolean isDefault;
 
-    @CreatedDate
-    @Column(updatable = false)
-    private LocalDateTime createdAt;
+    @Column(name = "trash_bundle_id")
+    private UUID trashBundleId;
 
-    @LastModifiedDate
-    private LocalDateTime updatedAt;
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
 
-    private LocalDateTime deletedAt;
+    @Column(name = "purge_after")
+    private Instant purgeAfter;
 
-    @Builder
-    public Collection(CollectionKind kind, String name, String color, String icon, Map<String, Object> attributes) {
-        this.kind = kind;
-        this.name = name;
-        this.color = color;
-        this.icon = icon;
-        this.attributes = attributes != null ? attributes : new HashMap<>();
-    }
-
-    public void update(String name, String color, String icon, Map<String, Object> attributes) {
-        this.name = name;
-        this.color = color;
-        this.icon = icon;
-        this.attributes = attributes != null ? attributes : new HashMap<>();
-    }
-
-    public void delete() {
-        this.deletedAt = LocalDateTime.now();
-    }
+    @Generated(event = EventType.INSERT)
+    @Column(name = "sync_seq", nullable = false, insertable = false)
+    private Long syncSeq;
 }

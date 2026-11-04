@@ -1,68 +1,104 @@
-# Bedrock App Backend - 시스템 설계서 (Architecture)
+# 공통 기반과 새 모델
 
-## 1. 프로젝트 개요
-본 프로젝트는 Spring Boot 기반의 백엔드 API 서버입니다. 
-애플리케이션과 데이터베이스 인프라를 Docker Compose를 통해 컨테이너화하여, 로컬 개발 환경과 배포 환경의 일관성을 유지합니다.
+`공통-파일.md` 2026-11-01판의 1단계 공통 파일과 전체 저장 모델을 적용한다.
+루트 패키지는 기존 저장소의 `com.bedrock.app`를 유지한다.
+기존 액션·임의 JSON 기반 아이템·종류별 공유 컬렉션 모델과 API는 제거했다.
+이번 범위는 공통 기반과 새 모델이며 실제 담당 기능은 각 패키지에서 구현한다.
 
-## 2. 기술 스택 (Tech Stack)
-* **Language**: Java 21
-* **Framework**: Spring Boot
-* **Database**: PostgreSQL 15
-* **ORM/Data Access**: Spring Data JPA / Hibernate
-* **Infrastructure**: Docker, Docker Compose
-* **DB Management**: pgAdmin4
+## 요구사항 대응
 
-## 3. 인프라 아키텍처 (Infrastructure)
-애플리케이션과 연관 서비스들은 `docker-compose.yml`을 통해 하나의 내부 네트워크에서 동작합니다.
+| 요구사항 | 구현 위치 / 동작 |
+| --- | --- |
+| 전체 스키마 | `V5__init_workspace_schema.sql`: 26개 테이블, workspace_sync_seq, FK·인덱스·CHECK |
+| 새 저장 모델 | 담당별 domain 패키지의 26개 JPA 엔티티, 고정 아이템의 복합 키 |
+| 이력 보존과 전환 | V1~V3 불변, V4는 구형 데이터 유무 검사 후 빈 구형 테이블만 제거 |
+| Flyway + JPA 검증 | `application.yml`: validate, out-of-order, UTC, open-in-view 비활성화 |
+| 공통 응답·페이지 | `ApiResponse`, `CursorPageResponse`, `ApiResponseAdvice` |
+| 오류 계약 | `ErrorCode`, `BusinessException`, 담당별 Enum 3개, `GlobalExceptionHandler` |
+| 공통 도메인 | `BaseTimeEntity`, `SwatchColor`, `TodoStatus`, `LinkType` |
+| 담당 간 호출 | `common.port`의 5개 인터페이스와 DTO |
+| 초기 Stub | `PortStubAutoConfiguration`: 구현 빈이 없을 때 등록, 호출 시 503 |
+| 세션 사용자 | `@CurrentUser SessionPrincipal`, UUID 계정·기기, Redis 직렬화 |
+| 세션 수명 | `SessionAuthenticationService`: 인증 성공 후 세션 ID·CSRF 교체, 로그아웃 |
+| 공통 설정 | Security, CORS, Session, Password, Jackson, Async, Persistence |
+| 웹 탭 검증 | `WebTabAccountFilter`: 불일치·잘못된 UUID·중복 헤더를 ACCOUNT_MISMATCH로 거부 |
+| 로그·캐시 | `EndpointAccessLogFilter`: no-store, IP·메서드·라우트·상태·시간·사용자 UUID |
+| 로그 보관 | 콘솔 + 파일, 20MB, gzip, 365일, 파일 종류별 최대 10GB |
+| 개발 Compose | `docker-compose.yaml`: 기본 인프라, app 프로필로 백엔드 추가 |
+| 배포 | Noble 기반 JRE, linux/amd64, 비루트 사용자, 호스트 Nginx의 loopback 포트 |
+| 난독화 | `proguard.pro`, `bootJarObfuscate`: 앱 클래스만 난독화한 뒤 BootJar 재조립 |
+| 이미지 배포 | build-push.sh, docker-compose-deployment.yaml, .env.example, start.sh |
 
-```mermaid
-graph TD
-    subgraph Host ["Host OS (로컬 PC)"]
-        User(["사용자 (Web Browser)"])
-    end
+## 담당 경계
 
-    subgraph Network ["Docker Compose 내부 네트워크"]
-        App["app (Spring Boot)"]
-        DB[("db (PostgreSQL 15)")]
-        PgAdmin["pgadmin (pgAdmin4)"]
-    end
+| 담당 | 패키지 | 추가 마이그레이션 |
+| --- | --- | --- |
+| BE 1 | auth, mail, crypto, ai, conversation, ocr | V101부터 |
+| BE 2 | item, link, sync, conflict, batch, undo | V201부터 |
+| BE 3 | collection, setting, trash, recurrence, timetable, ics | V301부터 |
 
-    User -->|":8080"| App
-    User -->|":5050"| PgAdmin
-    App -->|"5432 (Internal)"| DB
-    PgAdmin -->|"5432 (Internal)"| DB
+공통 기반 확정 후에는 자기 패키지와 담당 에러 Enum 안에서 작업한다.
+다른 담당의 서비스나 저장소를 직접 주입하지 않고 `common.port`를 사용한다.
 
-    %% Style Definitions (Pastel Theme)
-    style User fill:#FFF2CC,stroke:#D6B656,stroke-width:2px;
-    style App fill:#DAE8FC,stroke:#6C8EBF,stroke-width:2px;
-    style DB fill:#D5E8D4,stroke:#82B366,stroke-width:2px;
-    style PgAdmin fill:#E1D5E7,stroke:#9673A6,stroke-width:2px;
-    
-    style Host fill:#F5F5F5,stroke:#CCCCCC,stroke-width:1px,stroke-dasharray: 5 5;
-    style Network fill:#F9F9F9,stroke:#B3B3B3,stroke-width:1px;
-```
+- BE 1: `UserCryptoPort` 구현.
+- BE 2: `ItemBatchWritePort`, `ConflictRegistryPort` 구현.
+- BE 3: `ScheduleMutationPort` 구현.
+- BE 2·3: 각 작업을 조합하는 `WorkspaceLifecyclePort` 구현 빈 하나를 제공.
 
-* **`db` (PostgreSQL)**: 메인 데이터베이스. `postgres_data` 볼륨을 통해 컨테이너가 재시작되어도 데이터가 영구적으로 보존됩니다.
-* **`app` (Spring Boot)**: 멀티 스테이지 빌드(Gradle 빌드 -> JRE 실행)가 적용된 `Dockerfile`을 통해 구동되는 API 서버 컨테이너입니다.
-* **`pgadmin`**: 데이터베이스 상태를 웹 UI(Port 5050)에서 확인하고 쿼리를 실행할 수 있는 관리 툴입니다.
+Stub은 연결 계약이며 암호화·저장·삭제의 성공을 가장하지 않는다.
+호출하면 `503 FEATURE_NOT_READY`가 발생하고 실제 구현 빈을 등록하면 해당 Stub은 자동으로 제외된다.
+패키지의 `package-info.java`는 담당 범위를 표시한다.
 
-## 4. 디렉토리 구조 (Directory Structure)
-```text
-app-backend/
-├── .env                    # 환경 변수 (Git 추적 제외)
-├── docker-compose.yml      # 도커 인프라 설정
-├── Dockerfile              # 스프링 부트 앱 빌드 및 실행 이미지 명세
-├── build.gradle            # 프로젝트 의존성 관리
-└── src/main/java/com/bedrock/app/
-    └── debug/              # DB 연결 테스트 및 기본 세팅 검증용 모듈
-        ├── DebugController.java
-        ├── DebugService.java
-        ├── DebugRepository.java
-        └── DebugEntity.java
-```
+## DB 전환과 JPA 모델
 
-## 5. 데이터 흐름 (Data Flow)
-1. 외부 클라이언트가 `http://localhost:8080/api/...` 로 요청을 보냅니다.
-2. `app` 컨테이너의 Controller가 요청을 받아 Service 계층으로 넘깁니다.
-3. Service 계층에서 비즈니스 로직을 처리한 뒤 Repository(JPA)를 호출합니다.
-4. JPA가 환경 변수(`.env`)로 주입된 접속 정보를 바탕으로 도커 내부 네트워크의 `db:5432`에 쿼리를 실행합니다.
+이미 적용된 V1~V3 파일의 체크섬을 깨지 않기 위해 명세의 전체 초기 스키마는 V5로 도입한다.
+빈 DB에서는 V1~V3 → V4 정리 → V5 새 스키마 순서로 적용된다.
+V4는 구형 users, collections, collection_users, items, actions, action_steps, debug_test에
+행이 하나라도 있으면 예외를 발생시켜 중단한다. 기존 데이터를 자동 삭제하거나 평문을 암호문으로 간주해 옮기지 않는다.
+기존 데이터가 있다면 백업과 별도 이관 계획을 완료한 새 DB를 사용해야 한다.
+
+최종 스키마에는 구형 컬럼·테이블이나 호환용 legacy 스키마가 없다.
+로컬 PostgreSQL 17은 `bedrock-local` 프로젝트의 `postgres_data_v2` 볼륨을 사용한다.
+구형 PostgreSQL 15 볼륨을 새 이미지에 연결하거나 삭제하지 않는다.
+
+새 모델은 UUID 식별자와 사용자 소유자 ID를 사용하며, ID는 호출자가 명시적으로 제공한다.
+관계는 UUID 필드로 표현하고 FK·유일성·CHECK 제약은 정본 SQL에서 강제한다.
+시간대가 있는 시각은 Instant, 날짜는 LocalDate, 시간표 시간은 LocalTime이다.
+JSONB는 각 필드에 맞는 배열·맵으로 표현하며, 자유 구조인 입력 화면 field_groups_json은 Object다.
+`*_enc`는 암호문 저장 필드다. 실제 암복호화는 UserCryptoPort 구현에서 수행한다.
+
+생성·수정 시각은 JPA Auditing을 적용한다. 둘 다 있는 엔티티는 BaseTimeEntity를 상속한다.
+sync_seq는 삽입 시 DB 시퀀스 값을 읽어 온다. 이후 변경 시의 새 동기화 번호 배정과 칸 단위 병합은
+BE 2의 실제 쓰기 구현에서 처리해야 한다. 빌더는 저장 모델 생성 도구이며 기능별 유효성 검증을 대신하지 않는다.
+
+## 공통 HTTP·보안
+
+성공 응답은 `{"success":true,"data":...,"error":null}`이다.
+실패 응답은 `{"success":false,"data":null,"error":{"code":"...","message":"...","details":...}}`이다.
+204 응답에는 본문이 없다. 없는 대상과 타인 소유 대상에는 같은 RESOURCE_NOT_FOUND를 사용한다.
+
+현재 실제 업무 API는 제공하지 않는다. `/api/auth/csrf`는 쓰기 요청을 위한 사전 세션과 토큰을 제공한다.
+BE 1은 실제 자격 증명 검증 후 SessionAuthenticationService.signIn을 호출한다.
+이 메서드는 세션 ID와 CSRF 토큰을 교체하며 인증되지 않은 사용자의 신원을 검증하는 기능은 하지 않는다.
+컨트롤러는 `@CurrentUser SessionPrincipal`로 인증 주체를 받는다.
+
+세션은 Redis의 `bedrock:session:v2`에 저장되고 무활동 30분 뒤 만료된다.
+쿠키는 BEDROCK_SESSION, HttpOnly, SameSite=Lax, 호스트 전용이고 Secure 기본값은 true다.
+로컬 HTTP에서만 COOKIE_SECURE=false를 사용한다. 비밀번호 인코더는 Argon2id(19MiB, 반복 2, 병렬도 1)다.
+웹 탭 계정 헤더가 세션과 다르면 CSRF/컨트롤러 처리 전에 ACCOUNT_MISMATCH로 거절한다.
+
+로그에는 본문·쿼리·쿠키·토큰·예외 메시지·SQL 바인딩 값을 넣지 않는다.
+경로 토큰도 배제하기 위해 `/api/items/{id}` 같은 매핑 템플릿만 기록한다.
+MVC에 도달하기 전 거절되거나 매핑이 없는 요청은 `[unmapped]`로 기록한다.
+Tomcat native forwarded-header 처리가 신뢰한 IP를 사용하며 루프백 프록시의 전달 헤더만 추가로 읽는다.
+호스트 Nginx는 외부 클라이언트의 전달 헤더를 자기 값으로 덮어써야 한다.
+
+## 난독화
+
+ProGuard는 앱 클래스에만 적용한다. Boot 로더와 외부 라이브러리는 의존성 JAR로 유지한다.
+Spring 설정·컨트롤러·JPA·DTO·Enum·세션·포트 등 반사 접근 경계는 보존하고 내부 서비스 이름을 변경한다.
+서비스 빈에는 명시적인 이름을 지정한다. 매핑 파일은 `build/obfuscation/mapping.txt`에 남으며 이미지에는 넣지 않는다.
+
+참조한 공식 문서:
+[Spring Session / Boot](https://docs.spring.io/spring-boot/4.0/reference/web/spring-session.html),
+[ProGuard Spring Boot 예제](https://github.com/Guardsquare/proguard/blob/master/examples/spring-boot/build.gradle).
