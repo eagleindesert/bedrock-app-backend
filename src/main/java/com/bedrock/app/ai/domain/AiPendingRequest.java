@@ -31,9 +31,16 @@ public class AiPendingRequest extends BaseTimeEntity {
     @Column(name = "status", nullable = false, length = 20)
     private String status;
 
+    /** 해석 · 답 버전. expectedAiRevision과 AI_REQUEST_CHANGED 검사에 쓴다. */
+    @Column(name = "revision", nullable = false, length = 64)
+    private String revision;
+
     @Column(name = "context_payload_enc", nullable = false, columnDefinition = "text")
     private String contextPayloadEnc;
 
     @Column(name = "result_batch_id")
     private UUID resultBatchId;
+
+    @Column(name = "conversation_id")
+    private UUID conversationId;
 }

@@ -16,6 +16,7 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 
 /** 공통 명세의 conflict_candidates 저장 모델. 기능별 검증과 변경 연산은 담당 패키지에서 구현한다. */
@@ -39,6 +40,16 @@ public class ConflictCandidate {
 
     @Column(name = "field_key", nullable = false, length = 100)
     private String fieldKey;
+
+    /** FIELD_VALUE | ORPHANED_OCCURRENCE */
+    @Column(name = "kind", nullable = false, length = 30)
+    private String kind;
+
+    @Column(name = "occurrence_date")
+    private LocalDate occurrenceDate;
+
+    @Column(name = "occurrence_slot_id")
+    private UUID occurrenceSlotId;
 
     @Column(name = "candidate_value_enc", nullable = false, columnDefinition = "text")
     private String candidateValueEnc;

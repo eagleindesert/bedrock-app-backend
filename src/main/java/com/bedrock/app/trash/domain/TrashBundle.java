@@ -9,6 +9,8 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.Generated;
+import org.hibernate.generator.EventType;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -43,4 +45,8 @@ public class TrashBundle {
 
     @Column(name = "restored_at")
     private Instant restoredAt;
+
+    @Generated(event = EventType.INSERT)
+    @Column(name = "sync_seq", nullable = false, insertable = false)
+    private Long syncSeq;
 }

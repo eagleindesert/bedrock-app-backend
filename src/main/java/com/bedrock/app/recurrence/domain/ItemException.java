@@ -44,6 +44,10 @@ public class ItemException {
     @Column(name = "recurrence_date", nullable = false)
     private LocalDate recurrenceDate;
 
+    /** 시간표 회차의 시간대(slotId). 일반 반복은 null */
+    @Column(name = "slot_id")
+    private UUID slotId;
+
     @Column(name = "is_deleted_occurrence", nullable = false)
     private boolean isDeletedOccurrence;
 

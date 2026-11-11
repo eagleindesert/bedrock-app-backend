@@ -10,7 +10,9 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.Generated;
 import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.generator.EventType;
 import org.hibernate.type.SqlTypes;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
@@ -39,6 +41,10 @@ public class InputScreenConfig {
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "field_groups_json", nullable = false, columnDefinition = "jsonb")
     private Object fieldGroupsJson;
+
+    @Generated(event = EventType.INSERT)
+    @Column(name = "sync_seq", nullable = false, insertable = false)
+    private Long syncSeq;
 
     @LastModifiedDate
     @Column(name = "updated_at", nullable = false)

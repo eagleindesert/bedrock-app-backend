@@ -12,7 +12,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 
 import java.time.LocalDate;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -60,7 +59,7 @@ public class PortStubAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(ConflictRegistryPort.class)
     public ConflictRegistryPort conflictRegistryPort() {
-        return (userId, masterItemId, fieldKey, plainCandidateJson, sourceWriteId) -> { throw unavailable(); };
+        return (userId, occurrence, fieldKey, plainCandidateJson, sourceWriteId) -> { throw unavailable(); };
     }
 
     @Bean
@@ -68,8 +67,8 @@ public class PortStubAutoConfiguration {
     public ScheduleMutationPort scheduleMutationPort() {
         return new ScheduleMutationPort() {
             @Override
-            public void validateAndSaveTimetableSlots(UUID userId, UUID itemId, UUID collectionId,
-                    List<ItemBatchWritePort.TimetableSlotSpec> slots) {
+            public void validateAndSaveTimetable(UUID userId, UUID itemId, UUID collectionId,
+                    ItemBatchWritePort.TimetableSpec timetable) {
                 throw unavailable();
             }
 
@@ -79,14 +78,14 @@ public class PortStubAutoConfiguration {
             }
 
             @Override
-            public UUID applyOccurrenceException(UUID userId, UUID masterItemId, LocalDate occurrenceDate,
-                    Map<String, Object> changedFields, boolean deleteOccurrence) {
+            public UUID applyOccurrenceException(UUID userId, ItemBatchWritePort.OccurrenceRef occurrence,
+                    Map<String, Object> changedFields, boolean deleteOccurrence, UUID writeId) {
                 throw unavailable();
             }
 
             @Override
             public UUID splitAndModifySeries(UUID userId, UUID masterItemId, LocalDate effectiveFrom,
-                    Map<String, Object> changedFields, boolean isTimetable) {
+                    Map<String, Object> changedFields, boolean isTimetable, UUID writeId) {
                 throw unavailable();
             }
         };

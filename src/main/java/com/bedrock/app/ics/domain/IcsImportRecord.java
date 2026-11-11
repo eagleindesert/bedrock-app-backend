@@ -10,6 +10,8 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.Generated;
+import org.hibernate.generator.EventType;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
@@ -40,6 +42,10 @@ public class IcsImportRecord {
 
     @Column(name = "last_imported_snapshot_enc", nullable = false, columnDefinition = "text")
     private String lastImportedSnapshotEnc;
+
+    @Generated(event = EventType.INSERT)
+    @Column(name = "sync_seq", nullable = false, insertable = false)
+    private Long syncSeq;
 
     @LastModifiedDate
     @Column(name = "updated_at", nullable = false)
