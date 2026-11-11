@@ -10,6 +10,8 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.Generated;
+import org.hibernate.generator.EventType;
 
 import java.time.LocalDate;
 import java.util.UUID;
@@ -38,6 +40,17 @@ public class Conversation extends BaseTimeEntity {
     @Column(name = "content_enc", nullable = false, columnDefinition = "text")
     private String contentEnc;
 
+    @Column(name = "request_id")
+    private UUID requestId;
+
     @Column(name = "related_batch_id")
     private UUID relatedBatchId;
+
+    /** expectedRevision 검사용 버전 */
+    @Column(name = "revision", nullable = false, length = 64)
+    private String revision;
+
+    @Generated(event = EventType.INSERT)
+    @Column(name = "sync_seq", nullable = false, insertable = false)
+    private Long syncSeq;
 }

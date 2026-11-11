@@ -120,10 +120,10 @@ bash scripts/tests/obfuscated-smoke.sh
 
 단위·MVC 검증은 공통 응답, 오류, CSRF, 계정 불일치, 세션 교체,
 민감값 없는 로그, Argon2id, 포트 Stub 교체를 확인한다.
-모델 검증은 DB 연결 없이 Hibernate 메타데이터를 구성하여 26개 엔티티의 컬럼·타입·NULL 조건을 정본 SQL과 대조한다.
+모델 검증은 DB 연결 없이 Hibernate 메타데이터를 구성하여 31개 엔티티의 컬럼·타입·NULL 조건을 정본 SQL(V5 전체 스키마에 V6 보정을 얹은 것)과 대조한다.
 
 DB 통합 검증은 Testcontainers의 독립 PostgreSQL 17에서 구형 데이터 삭제 거부,
-빈 DB 전환, 26개 테이블, 멱등 마이그레이션과 역순 버전 적용을 확인한다.
+빈 DB 전환, 31개 테이블, 멱등 마이그레이션과 역순 버전 적용을 확인한다.
 전체 애플리케이션 검증은 Redis도 띄워 JPA validate, 모델 저장·Auditing·sync_seq,
 세션의 실제 저장과 30분 만료를 확인한다. Docker가 없으면 두 통합 테스트 그룹(3개 테스트)을 명시적으로 중단 처리한다.
 

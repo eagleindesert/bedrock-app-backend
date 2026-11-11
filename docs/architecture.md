@@ -10,7 +10,8 @@
 | 요구사항 | 구현 위치 / 동작 |
 | --- | --- |
 | 전체 스키마 | `V5__init_workspace_schema.sql`: 26개 테이블, workspace_sync_seq, FK·인덱스·CHECK |
-| 새 저장 모델 | 담당별 domain 패키지의 26개 JPA 엔티티, 고정 아이템의 복합 키 |
+| API 명세 v1.0 보정 | `V6__align_with_api_v1.sql`: 쓰기 기록·삭제 흔적·칸 쓰기 이력·묶음 결과·시간표 기간 5개 테이블 추가, 묶음 키·회차 예외 키·시간대 열 정리 (`공통-파일.md` 2.4) |
+| 새 저장 모델 | 담당별 domain 패키지의 31개 JPA 엔티티, 고정 아이템 · 묶음 요청 · 묶음 결과 · 칸 버전 · 쓰기 기록의 복합 키 |
 | 이력 보존과 전환 | V1~V3 불변, V4는 구형 데이터 유무 검사 후 빈 구형 테이블만 제거 |
 | Flyway + JPA 검증 | `application.yml`: validate, out-of-order, UTC, open-in-view 비활성화 |
 | 공통 응답·페이지 | `ApiResponse`, `CursorPageResponse`, `ApiResponseAdvice` |

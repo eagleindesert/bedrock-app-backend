@@ -1,9 +1,9 @@
 package com.bedrock.app.sync.domain;
 
 import jakarta.persistence.Column;
+import jakarta.persistence.EmbeddedId;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EntityListeners;
-import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
@@ -16,7 +16,10 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 import java.time.Instant;
 import java.util.UUID;
 
-/** 공통 명세의 item_field_versions 저장 모델. 기능별 검증과 변경 연산은 담당 패키지에서 구현한다. */
+/**
+ * 공통 명세의 item_field_versions 저장 모델. 칸마다 지금의 마지막 쓰기만 둔다.
+ * 쓰기마다의 직전 값과 되돌리기 상태는 {@link ItemFieldWrite}가 갖는다.
+ */
 @Entity
 @Table(name = "item_field_versions")
 @Getter
@@ -25,24 +28,15 @@ import java.util.UUID;
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 @EntityListeners(AuditingEntityListener.class)
 public class ItemFieldVersion {
-    @Id
-    @Column(name = "id", nullable = false)
-    private UUID id;
+    @EmbeddedId
+    private ItemFieldVersionId id;
 
     @Column(name = "user_id", nullable = false)
     private UUID userId;
 
-    @Column(name = "item_id", nullable = false)
-    private UUID itemId;
-
-    @Column(name = "field_key", nullable = false, length = 100)
-    private String fieldKey;
-
-    @Column(name = "last_write_id", nullable = false)
+    /** 마지막으로 반영한 쓰기. 처음 값이면 null(API의 baseFieldVersions null과 같다). */
+    @Column(name = "last_write_id")
     private UUID lastWriteId;
-
-    @Column(name = "previous_value_enc", columnDefinition = "text")
-    private String previousValueEnc;
 
     @LastModifiedDate
     @Column(name = "updated_at", nullable = false)

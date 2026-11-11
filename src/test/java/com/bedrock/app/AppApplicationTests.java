@@ -77,7 +77,7 @@ class AppApplicationTests extends PostgresIntegrationSupport {
     @Test
     @Transactional
     void canonicalEntitiesMatchDdlAndReceiveAuditTimesAndSyncSequences() {
-        assertThat(entities.getMetamodel().getEntities()).hasSize(26);
+        assertThat(entities.getMetamodel().getEntities()).hasSize(31);
         var user = User.builder().id(UUID.randomUUID()).email("model@example.com")
                 .name("Model test").status("ACTIVE").build();
         entities.persist(user);
