@@ -6,6 +6,8 @@ import org.hibernate.boot.registry.StandardServiceRegistryBuilder;
 import org.hibernate.boot.spi.MetadataImplementor;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
 
 import java.nio.charset.StandardCharsets;
@@ -13,16 +15,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * DB 연결 없이도 전체 JPA 매핑의 컬럼·타입·NULL 허용 여부를 정본 SQL과 대조한다.
- * 정본은 V5의 전체 스키마에 V6부터의 공통 보정(CREATE TABLE · ADD COLUMN · DROP COLUMN · DROP NOT NULL)을 차례로 얹은 것이다.
+ * 정본은 V5의 전체 스키마에 V6부터 V100까지의 공통 보정(CREATE TABLE · ADD COLUMN · DROP COLUMN · DROP NOT NULL · SET NOT NULL)을 차례로 얹은 것이다.
  */
 class CanonicalModelSchemaTest {
-    private static final int CANONICAL_TABLE_COUNT = 31;
+    private static final int CANONICAL_TABLE_COUNT = 32;
     private static final String TYPES = "UUID|VARCHAR|TEXT|INT|BIGINT|SMALLINT|TIMESTAMPTZ|BYTEA|BOOLEAN|DATE|TIME|JSONB";
     private static final Pattern TABLE = Pattern.compile(
             "CREATE TABLE IF NOT EXISTS (\\w+) \\(\\n([\\s\\S]*?)\\n\\);");
@@ -34,9 +37,10 @@ class CanonicalModelSchemaTest {
             "(?m)^ALTER TABLE (\\w+) DROP COLUMN (\\w+);");
     private static final Pattern DROP_NOT_NULL = Pattern.compile(
             "(?m)^ALTER TABLE (\\w+) ALTER COLUMN (\\w+) DROP NOT NULL;");
-    private static final List<String> COMMON_MIGRATIONS = List.of(
-            "V5__init_workspace_schema.sql",
-            "V6__align_with_api_v1.sql");
+    private static final Pattern SET_NOT_NULL = Pattern.compile(
+            "(?m)^ALTER TABLE (\\w+) ALTER COLUMN (\\w+) SET NOT NULL;");
+    /** 공통 보정은 V5부터 V100까지다. 담당별 대역(V101~)은 각 담당이 자기 테스트에서 대조한다. */
+    private static final Pattern COMMON_MIGRATION = Pattern.compile("V(\\d+)__\\w+\\.sql");
 
     @Test
     void allEntitiesMatchTheCanonicalSchema() throws Exception {
@@ -81,10 +85,23 @@ class CanonicalModelSchemaTest {
 
     private Map<String, Map<String, ColumnSpec>> schemaColumns() throws Exception {
         var tables = new LinkedHashMap<String, Map<String, ColumnSpec>>();
-        for (String migration : COMMON_MIGRATIONS) {
+        for (String migration : commonMigrations()) {
             applyMigration(tables, readMigration(migration));
         }
         return tables;
+    }
+
+    /** classpath의 공통 마이그레이션 파일 이름을 버전 순서로 돌려준다. 새 공통 보정을 더해도 이 목록은 고치지 않는다. */
+    static List<String> commonMigrations() throws Exception {
+        var resolver = new PathMatchingResourcePatternResolver();
+        var names = new TreeMap<Integer, String>();
+        for (Resource resource : resolver.getResources("classpath:/db/migration/V*__*.sql")) {
+            var matcher = COMMON_MIGRATION.matcher(resource.getFilename());
+            if (!matcher.matches()) continue;
+            int version = Integer.parseInt(matcher.group(1));
+            if (version >= 5 && version <= 100) names.put(version, resource.getFilename());
+        }
+        return List.copyOf(names.values());
     }
 
     private String readMigration(String fileName) throws Exception {
@@ -119,6 +136,13 @@ class CanonicalModelSchemaTest {
             var column = columns.get(nullable.group(2));
             assertThat(column).as("%s.%s", nullable.group(1), nullable.group(2)).isNotNull();
             columns.put(nullable.group(2), new ColumnSpec(column.type(), true, column.length()));
+        }
+        var required = SET_NOT_NULL.matcher(sql);
+        while (required.find()) {
+            var columns = existing(tables, required.group(1));
+            var column = columns.get(required.group(2));
+            assertThat(column).as("%s.%s", required.group(1), required.group(2)).isNotNull();
+            columns.put(required.group(2), new ColumnSpec(column.type(), false, column.length()));
         }
     }
 

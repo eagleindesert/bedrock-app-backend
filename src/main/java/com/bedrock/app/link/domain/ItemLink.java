@@ -37,6 +37,10 @@ public class ItemLink {
     @Column(name = "user_id", nullable = false)
     private UUID userId;
 
+    /** 속한 워크스페이스. 동기화 잠금 · 커서의 단위다(V9). */
+    @Column(name = "workspace_id", nullable = false)
+    private UUID workspaceId;
+
     @Column(name = "source_item_id", nullable = false)
     private UUID sourceItemId;
 
@@ -47,8 +51,9 @@ public class ItemLink {
     @Column(name = "link_type", nullable = false, length = 30)
     private LinkType linkType;
 
-    @Generated(event = EventType.INSERT)
-    @Column(name = "sync_seq", nullable = false, insertable = false)
+    /** DB가 정한다: INSERT는 기본값, UPDATE는 V10 트리거. JPA는 쓰지 않고 다시 읽는다. */
+    @Generated(event = {EventType.INSERT, EventType.UPDATE})
+    @Column(name = "sync_seq", nullable = false, insertable = false, updatable = false)
     private Long syncSeq;
 
     @CreatedDate

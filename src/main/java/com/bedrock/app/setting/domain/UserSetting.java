@@ -31,6 +31,13 @@ import java.util.UUID;
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 @EntityListeners(AuditingEntityListener.class)
 public class UserSetting {
+    /** 가입 때의 기본 알림. V8 마이그레이션의 열 기본값과 같다. */
+    public static final Map<String, List<Integer>> INITIAL_DEFAULT_ALARMS = Map.of(
+            "timedEvent", List.of(10),
+            "allDayEvent", List.of(0),
+            "timedTodo", List.of(0),
+            "dateOnlyTodo", List.of(0));
+
     @Id
     @Column(name = "user_id", nullable = false)
     private UUID userId;
@@ -46,6 +53,10 @@ public class UserSetting {
     @Column(name = "day_start_hour", nullable = false)
     @Builder.Default
     private Short dayStartHour = (short) 7;
+
+    /** 계정의 기본 IANA 시간대. 새 아이템이 받는 값이고, 처음 값은 가입한 기기의 시간대다. 기본값을 두지 않는다. */
+    @Column(name = "time_zone", nullable = false, length = 64)
+    private String timeZone;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "density_json", nullable = false, columnDefinition = "jsonb")
@@ -65,13 +76,18 @@ public class UserSetting {
     @Column(name = "ocr_server_consent", nullable = false)
     private boolean ocrServerConsent;
 
+    /**
+     * 종류별 기본 알림(F-41 · F-46). 키는 timedEvent · allDayEvent · timedTodo · dateOnlyTodo,
+     * 값은 아이템 알람 칸과 같은 "기준 시각 몇 분 전" 목록이다. 서버는 저장만 하고 채우는 일은 기기가 한다.
+     */
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "visible_collection_ids_json", nullable = false, columnDefinition = "jsonb")
+    @Column(name = "default_alarms_json", nullable = false, columnDefinition = "jsonb")
     @Builder.Default
-    private List<UUID> visibleCollectionIdsJson = List.of();
+    private Map<String, List<Integer>> defaultAlarmsJson = INITIAL_DEFAULT_ALARMS;
 
-    @Generated(event = EventType.INSERT)
-    @Column(name = "sync_seq", nullable = false, insertable = false)
+    /** DB가 정한다: INSERT는 기본값, UPDATE는 V10 트리거. JPA는 쓰지 않고 다시 읽는다. */
+    @Generated(event = {EventType.INSERT, EventType.UPDATE})
+    @Column(name = "sync_seq", nullable = false, insertable = false, updatable = false)
     private Long syncSeq;
 
     @LastModifiedDate

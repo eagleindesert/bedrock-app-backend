@@ -36,7 +36,8 @@ class DatabaseMigrationTest extends PostgresIntegrationSupport {
             // 이 테스트가 만든 임시 DB의 샘플 행만 제거해 빈 DB 전환도 검증한다.
             sql.execute("DELETE FROM users WHERE id=17");
         }
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(3);
+        // V4(구형 정리)와 V5부터의 공통 마이그레이션 전부
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1 + CanonicalModelSchemaTest.commonMigrations().size());
         flyway.validate();
         assertThat(flyway.migrate().migrationsExecuted).isZero();
         try (Connection connection = connection(); Statement sql = connection.createStatement()) {
@@ -44,7 +45,7 @@ class DatabaseMigrationTest extends PostgresIntegrationSupport {
                     + "WHERE table_schema='public' AND table_type='BASE TABLE' "
                     + "AND table_name <> 'flyway_schema_history'");
             rows.next();
-            assertThat(rows.getInt(1)).isEqualTo(31);
+            assertThat(rows.getInt(1)).isEqualTo(32);
             rows = sql.executeQuery("SELECT data_type FROM information_schema.columns "
                     + "WHERE table_schema='public' AND table_name='users' AND column_name='id'");
             rows.next();

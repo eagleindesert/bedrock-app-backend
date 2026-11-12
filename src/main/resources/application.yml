@@ -32,8 +32,9 @@ spring:
       password: ${REDIS_PASSWORD:}
   session:
     timeout: 30m
-    redis:
-      namespace: bedrock:session:v2
+    data:
+      redis:
+        namespace: bedrock:session:v2
   mail:
     host: ${SMTP_HOST:localhost}
     port: ${SMTP_PORT:587}
@@ -47,6 +48,12 @@ spring:
       mail.smtp.writetimeout: 5000
   mvc:
     log-request-details: false
+  web:
+    # Boot 4는 server.error.*를 더 읽지 않는다(spring-boot-web-server 메타데이터: deprecation level error).
+    error:
+      include-message: never
+      include-binding-errors: never
+      include-stacktrace: never
 
 server:
   port: ${PORT:8080}
@@ -60,10 +67,6 @@ server:
         http-only: true
         secure: ${COOKIE_SECURE:true}
         same-site: lax
-  error:
-    include-message: never
-    include-binding-errors: never
-    include-stacktrace: never
 
 bedrock:
   cors:
@@ -94,12 +97,13 @@ management:
     health:
       show-details: never
 
+# API 문서는 기본으로 닫는다. 로컬(application-local.yml)과 스모크 픽스처만 연다.
 springdoc:
   api-docs:
-    enabled: ${SWAGGER_ENABLED:true}
+    enabled: ${SWAGGER_ENABLED:false}
     path: /v3/api-docs
   swagger-ui:
-    enabled: ${SWAGGER_ENABLED:true}
+    enabled: ${SWAGGER_ENABLED:false}
     path: /swagger-ui.html
     tags-sorter: alpha
     operations-sorter: method

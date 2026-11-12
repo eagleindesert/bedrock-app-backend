@@ -11,3 +11,10 @@ server:
     session:
       cookie:
         secure: ${COOKIE_SECURE:false}
+
+# 로컬 개발에서는 API 문서를 연다. 기반 설정의 기본값은 닫힘이다.
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:true}
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:true}

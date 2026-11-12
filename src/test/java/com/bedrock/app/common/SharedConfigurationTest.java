@@ -64,7 +64,7 @@ class SharedConfigurationTest {
             assertThatThrownBy(() -> context.getBean(UserCryptoPort.class).encrypt(UUID.randomUUID(), "secret"))
                     .isInstanceOf(BusinessException.class).hasMessageNotContaining("secret");
             assertThatThrownBy(() -> context.getBean(WorkspaceLifecyclePort.class)
-                    .initializeWorkspaceForNewUser(UUID.randomUUID())).isInstanceOf(BusinessException.class);
+                    .initializeWorkspaceForNewUser(UUID.randomUUID(), "Asia/Seoul")).isInstanceOf(BusinessException.class);
         });
         var implementation = mock(UserCryptoPort.class);
         runner.withBean(UserCryptoPort.class, () -> implementation).run(context ->

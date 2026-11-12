@@ -26,6 +26,8 @@
 -keep class com.bedrock.app.**.dto.** { *; }
 -keep class * extends java.lang.Record { *; }
 -keep class com.bedrock.app.common.auth.SessionPrincipal { *; }
+# 설정 바인딩은 setter · 생성자 이름으로 한다. 이름이 바뀌면 배포 이미지에서만 값이 조용히 빈다.
+-keep @org.springframework.boot.context.properties.ConfigurationProperties class * { *; }
 -keep interface com.bedrock.app.common.port.** { *; }
 -keep enum com.bedrock.app.** { *; }
 

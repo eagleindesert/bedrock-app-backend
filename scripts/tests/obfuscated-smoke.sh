@@ -13,6 +13,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# set -e로 조용히 끝나지 않도록 실패한 줄과 명령, 앱 로그를 남긴다.
+report_failure() {
+    printf 'Smoke check failed at line %s: %s\n' "$1" "$2" >&2
+    docker compose --project-directory "${FIXTURE}" -p "${PROJECT_NAME}" logs be >&2 || true
+}
+trap 'report_failure "${LINENO}" "${BASH_COMMAND}"' ERR
+
 # CI에서만 사용할 독립 DB/Redis와 임시 쿠키 파일. 실제 프로젝트 .env는 읽지 않는다.
 cat > "${FIXTURE}/compose.yaml" <<EOF
 services:
@@ -49,6 +56,10 @@ services:
       DB_PASSWORD: smoke-only
       REDIS_HOST: redis
       COOKIE_SECURE: 'false'
+      # 픽스처에는 SMTP 서버가 없어 메일 헬스 체크가 항상 DOWN이므로 이 검증에서만 끈다.
+      MANAGEMENT_HEALTH_MAIL_ENABLED: 'false'
+      # 이 검증은 /v3/api-docs를 부른다. 배포 기본값은 닫힘이라 여기서만 연다.
+      SWAGGER_ENABLED: 'true'
 EOF
 
 docker build --platform linux/amd64 -t "${IMAGE_NAME}" "${PROJECT_ROOT}"

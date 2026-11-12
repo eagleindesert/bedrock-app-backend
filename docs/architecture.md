@@ -11,17 +11,21 @@
 | --- | --- |
 | 전체 스키마 | `V5__init_workspace_schema.sql`: 26개 테이블, workspace_sync_seq, FK·인덱스·CHECK |
 | API 명세 v1.0 보정 | `V6__align_with_api_v1.sql`: 쓰기 기록·삭제 흔적·칸 쓰기 이력·묶음 결과·시간표 기간 5개 테이블 추가, 묶음 키·회차 예외 키·시간대 열 정리 (`공통-파일.md` 2.4) |
-| 새 저장 모델 | 담당별 domain 패키지의 31개 JPA 엔티티, 고정 아이템 · 묶음 요청 · 묶음 결과 · 칸 버전 · 쓰기 기록의 복합 키 |
+| 아이템 시간대 · 날짜 마감 | `V7__item_time_zone_and_due_date.sql`: `items.time_zone` · `items.due_date`(`due_at`과 배타), `user_settings.time_zone`, `ItemTimeZones` · `@IanaTimeZone` (`공통-파일.md` 2.5) |
+| 새 저장 모델 | 담당별 domain 패키지의 32개 JPA 엔티티(V9의 `Workspace` 포함), 고정 아이템 · 묶음 요청 · 묶음 결과 · 칸 버전 · 쓰기 기록의 복합 키 |
 | 이력 보존과 전환 | V1~V3 불변, V4는 구형 데이터 유무 검사 후 빈 구형 테이블만 제거 |
+| 종류별 기본 알림 | `V8__user_settings_default_alarms.sql`: `user_settings.default_alarms_json`(네 종류, 가입 때 기본값, CHECK) (`공통-파일.md` 2.6) |
+| 공통 기반 고정 | `V9__workspaces_and_freeze.sql`: `workspaces`와 `workspace_id`, 보일 컬렉션을 보기 상태로, 공지 사용자별, `items.server_created_at`, 시간표 사슬. `V10__sync_triggers.sql`: sync_seq · tombstone 트리거 (`공통-파일.md` 2.7) |
 | Flyway + JPA 검증 | `application.yml`: validate, out-of-order, UTC, open-in-view 비활성화 |
 | 공통 응답·페이지 | `ApiResponse`, `CursorPageResponse`, `ApiResponseAdvice` |
 | 오류 계약 | `ErrorCode`, `BusinessException`, 담당별 Enum 3개, `GlobalExceptionHandler` |
 | 공통 도메인 | `BaseTimeEntity`, `SwatchColor`, `TodoStatus`, `LinkType` |
+| 반복 규칙 꼴 | `RecurrenceRule`: n일마다 · 매주 · 매월 · 매년 같은 날짜, 없는 날 건너뛰기(RFC 5545), 회차 날짜 계산 (`공통-파일.md` 4.4) |
 | 담당 간 호출 | `common.port`의 5개 인터페이스와 DTO |
 | 초기 Stub | `PortStubAutoConfiguration`: 구현 빈이 없을 때 등록, 호출 시 503 |
 | 세션 사용자 | `@CurrentUser SessionPrincipal`, UUID 계정·기기, Redis 직렬화 |
 | 세션 수명 | `SessionAuthenticationService`: 인증 성공 후 세션 ID·CSRF 교체, 로그아웃 |
-| 공통 설정 | Security, CORS, Session, Password, Jackson, Async, Persistence |
+| 공통 설정 | Security, CORS, Session, Password, Jackson(Instant 초 단위), Async, Persistence, yml 키 대조 테스트, Swagger 기본 닫힘 |
 | 웹 탭 검증 | `WebTabAccountFilter`: 불일치·잘못된 UUID·중복 헤더를 ACCOUNT_MISMATCH로 거부 |
 | 로그·캐시 | `EndpointAccessLogFilter`: no-store, IP·메서드·라우트·상태·시간·사용자 UUID |
 | 로그 보관 | 콘솔 + 파일, 20MB, gzip, 365일, 파일 종류별 최대 10GB |
@@ -65,6 +69,8 @@ V4는 구형 users, collections, collection_users, items, actions, action_steps,
 새 모델은 UUID 식별자와 사용자 소유자 ID를 사용하며, ID는 호출자가 명시적으로 제공한다.
 관계는 UUID 필드로 표현하고 FK·유일성·CHECK 제약은 정본 SQL에서 강제한다.
 시간대가 있는 시각은 Instant, 날짜는 LocalDate, 시간표 시간은 LocalTime이다.
+Instant는 초 단위다. `InstantSecondsConverter`(autoApply)가 저장할 때 초 아래를 버리고, 감사 시각도 초 단위로 찍는다.
+API는 `JacksonConfig`가 받을 때 밀리초 · 오프셋을 읽어 초 아래를 버리고, 보낼 때 늘 `YYYY-MM-DDTHH:mm:ssZ`로 쓴다.
 JSONB는 각 필드에 맞는 배열·맵으로 표현하며, 자유 구조인 입력 화면 field_groups_json은 Object다.
 `*_enc`는 암호문 저장 필드다. 실제 암복호화는 UserCryptoPort 구현에서 수행한다.
 

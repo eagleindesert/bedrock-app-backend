@@ -36,6 +36,10 @@ public class ItemRecurrence {
     @Column(name = "user_id", nullable = false)
     private UUID userId;
 
+    /** 속한 워크스페이스. 동기화 잠금 · 커서의 단위다(V9). */
+    @Column(name = "workspace_id", nullable = false)
+    private UUID workspaceId;
+
     @Column(name = "rrule", nullable = false, length = 500)
     private String rrule;
 

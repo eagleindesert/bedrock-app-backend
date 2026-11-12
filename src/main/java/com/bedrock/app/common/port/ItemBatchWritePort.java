@@ -12,6 +12,11 @@ import java.util.UUID;
  * 만들기 · 고치기 · 지우기 · 회차 예외 · 반복 나누기 · 미루기를 한 묶음(전부 아니면 없음)으로 실행하고,
  * (userId, batchId)로 재전송 중복 적용을 막는다. 같은 aiRequestId는 묶음 ID가 달라도 한 번만 완료한다.
  * 필드 구성은 「API 명세 합의 v1.0」의 BatchWriteRequest를 따른다.
+ * 묶음 안 연산이 칸을 바꾸면 그 칸의 lastWriteId와 item_field_writes.write_id에는 batchId가 아니라
+ * 그 연산의 operationId를 남긴다. 기기가 미리 정한 값이라 뒤 쓰기의 baseFieldVersions로 실을 수 있다.
+ * 만들기도 같다: 만들기가 값을 넣은 칸의 lastWriteId는 단건이면 writeId, 묶음이면 그 만들기의 operationId다.
+ * 만들기 · 고치기 · 지우기 · 미루기의 operationId는 기기가 정하고 필수이며 묶음 안에서 하나뿐이다.
+ * 쓰기는 대상 워크스페이스의 잠금(pg_advisory_xact_lock(hashtext(workspace_id::text))) 안에서 한다(V9).
  */
 public interface ItemBatchWritePort {
 
@@ -34,13 +39,18 @@ public interface ItemBatchWritePort {
             PendingInboxCompletion pendingInboxCompletion // 정리 대기 재시도 완료일 때(F-49)
     ) {}
 
-    /** 반복 회차의 정체성. 시간표 회차는 slotId까지, 일반 반복은 slotId가 null이다. */
+    /**
+     * 반복 회차의 정체성. 시간표 회차는 slotId까지, 일반 반복은 slotId가 null이다.
+     * recurrenceDate는 마스터 아이템 시간대(timeZone)의 날짜다. 시간표 회차는 시간대 없는 요일의 날짜다.
+     */
     record OccurrenceRef(UUID masterItemId, LocalDate recurrenceDate, UUID slotId) {}
 
     record ItemTarget(UUID itemId, OccurrenceRef occurrence) {}
 
     record ItemCreateSpec(
+            UUID operationId, // 기기가 정한 연산 ID. 만들기가 넣은 칸의 lastWriteId가 된다
             UUID itemId,
+            Instant createdAt, // 기기가 만든 시각. 비었거나 서버 시각보다 미래면 서버 시각(items.created_at, F-26)
             UUID collectionId, // null이면 기본 컬렉션
             String inputConfigCode,
             Map<String, Object> fields,
@@ -90,6 +100,7 @@ public interface ItemBatchWritePort {
 
     record CollectionCreateSpec(UUID collectionId, String name, String color, String icon) {}
 
+    /** rdates · exdates · untilDate · effectiveFrom은 마스터 아이템 시간대(timeZone)의 날짜다. */
     record RecurrenceSpec(
             String rrule,
             List<LocalDate> rdates,
@@ -99,7 +110,13 @@ public interface ItemBatchWritePort {
     ) {}
 
     /** 시간표 아이템의 기간은 아이템마다 하나이고, 시간대는 slotId로 가린다(F-30). */
-    record TimetableSpec(List<TimetableSlotSpec> slots, LocalDate periodStart, LocalDate periodEnd) {}
+    record TimetableSpec(
+            List<TimetableSlotSpec> slots,
+            LocalDate periodStart,
+            LocalDate periodEnd,
+            UUID seriesRootId, // 나뉜 시간표 아이템 사슬의 루트. 일반 만들기에서는 서버가 자기 itemId로 정한다
+            LocalDate effectiveFrom // 나뉜 뒤 아이템의 적용 시작일(주의 월요일). 처음 아이템은 null
+    ) {}
 
     record TimetableSlotSpec(UUID slotId, int dayOfWeek, LocalTime startTime, LocalTime endTime) {}
 

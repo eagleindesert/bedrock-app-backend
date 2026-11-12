@@ -50,7 +50,8 @@ public class Conversation extends BaseTimeEntity {
     @Column(name = "revision", nullable = false, length = 64)
     private String revision;
 
-    @Generated(event = EventType.INSERT)
-    @Column(name = "sync_seq", nullable = false, insertable = false)
+    /** DB가 정한다: INSERT는 기본값, UPDATE는 V10 트리거. JPA는 쓰지 않고 다시 읽는다. */
+    @Generated(event = {EventType.INSERT, EventType.UPDATE})
+    @Column(name = "sync_seq", nullable = false, insertable = false, updatable = false)
     private Long syncSeq;
 }

@@ -30,12 +30,23 @@ import java.util.UUID;
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 @EntityListeners(AuditingEntityListener.class)
 public class UserViewState {
+    /** 캘린더 보기 상태. state_json.hiddenCollectionIds를 갖는다. */
+    public static final String VIEW_CALENDAR = "CALENDAR_LAST_VIEW";
+    /** 시간표 보기 상태. state_json.hiddenCollectionIds를 갖는다. */
+    public static final String VIEW_TIMETABLE = "TIMETABLE";
+    /** 그 모듈에서 끈 컬렉션 id 목록. 빈 목록이면 모두 보이고, 새 컬렉션은 보이는 채 생긴다(V9). */
+    public static final String HIDDEN_COLLECTION_IDS = "hiddenCollectionIds";
+
     @Id
     @Column(name = "id", nullable = false)
     private UUID id;
 
     @Column(name = "user_id", nullable = false)
     private UUID userId;
+
+    /** 속한 워크스페이스. 동기화 잠금 · 커서의 단위다(V9). */
+    @Column(name = "workspace_id", nullable = false)
+    private UUID workspaceId;
 
     @Column(name = "view_key", nullable = false, length = 50)
     private String viewKey;
@@ -44,8 +55,9 @@ public class UserViewState {
     @Column(name = "state_json", nullable = false, columnDefinition = "jsonb")
     private Map<String, Object> stateJson;
 
-    @Generated(event = EventType.INSERT)
-    @Column(name = "sync_seq", nullable = false, insertable = false)
+    /** DB가 정한다: INSERT는 기본값, UPDATE는 V10 트리거. JPA는 쓰지 않고 다시 읽는다. */
+    @Generated(event = {EventType.INSERT, EventType.UPDATE})
+    @Column(name = "sync_seq", nullable = false, insertable = false, updatable = false)
     private Long syncSeq;
 
     @LastModifiedDate
