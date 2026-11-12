@@ -58,6 +58,8 @@ services:
       COOKIE_SECURE: 'false'
       # 픽스처에는 SMTP 서버가 없어 메일 헬스 체크가 항상 DOWN이므로 이 검증에서만 끈다.
       MANAGEMENT_HEALTH_MAIL_ENABLED: 'false'
+      # 이 검증은 /v3/api-docs를 부른다. 배포 기본값은 닫힘이라 여기서만 연다.
+      SWAGGER_ENABLED: 'true'
 EOF
 
 docker build --platform linux/amd64 -t "${IMAGE_NAME}" "${PROJECT_ROOT}"
