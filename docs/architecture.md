@@ -22,7 +22,7 @@
 | 초기 Stub | `PortStubAutoConfiguration`: 구현 빈이 없을 때 등록, 호출 시 503 |
 | 세션 사용자 | `@CurrentUser SessionPrincipal`, UUID 계정·기기, Redis 직렬화 |
 | 세션 수명 | `SessionAuthenticationService`: 인증 성공 후 세션 ID·CSRF 교체, 로그아웃 |
-| 공통 설정 | Security, CORS, Session, Password, Jackson, Async, Persistence |
+| 공통 설정 | Security, CORS, Session, Password, Jackson(Instant 초 단위), Async, Persistence |
 | 웹 탭 검증 | `WebTabAccountFilter`: 불일치·잘못된 UUID·중복 헤더를 ACCOUNT_MISMATCH로 거부 |
 | 로그·캐시 | `EndpointAccessLogFilter`: no-store, IP·메서드·라우트·상태·시간·사용자 UUID |
 | 로그 보관 | 콘솔 + 파일, 20MB, gzip, 365일, 파일 종류별 최대 10GB |
@@ -66,6 +66,8 @@ V4는 구형 users, collections, collection_users, items, actions, action_steps,
 새 모델은 UUID 식별자와 사용자 소유자 ID를 사용하며, ID는 호출자가 명시적으로 제공한다.
 관계는 UUID 필드로 표현하고 FK·유일성·CHECK 제약은 정본 SQL에서 강제한다.
 시간대가 있는 시각은 Instant, 날짜는 LocalDate, 시간표 시간은 LocalTime이다.
+Instant는 초 단위다. `InstantSecondsConverter`(autoApply)가 저장할 때 초 아래를 버리고, 감사 시각도 초 단위로 찍는다.
+API는 `JacksonConfig`가 받을 때 밀리초 · 오프셋을 읽어 초 아래를 버리고, 보낼 때 늘 `YYYY-MM-DDTHH:mm:ssZ`로 쓴다.
 JSONB는 각 필드에 맞는 배열·맵으로 표현하며, 자유 구조인 입력 화면 field_groups_json은 Object다.
 `*_enc`는 암호문 저장 필드다. 실제 암복호화는 UserCryptoPort 구현에서 수행한다.
 

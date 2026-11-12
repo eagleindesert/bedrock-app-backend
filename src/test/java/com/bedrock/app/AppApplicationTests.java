@@ -23,6 +23,7 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -92,5 +93,27 @@ class AppApplicationTests extends PostgresIntegrationSupport {
         assertThat(item.getUpdatedAt()).isNotNull();
         assertThat(collection.getSyncSeq()).isPositive();
         assertThat(item.getSyncSeq()).isGreaterThan(collection.getSyncSeq());
+    }
+
+    @Test
+    @Transactional
+    void instantsAreStoredAtSecondPrecision() {
+        var user = User.builder().id(UUID.randomUUID()).email("seconds@example.com")
+                .name("Seconds test").status("ACTIVE").build();
+        entities.persist(user);
+        var collection = Collection.builder().id(UUID.randomUUID()).userId(user.getId())
+                .nameEnc("ciphertext-fixture").color(SwatchColor.BLUE).icon("folder").build();
+        entities.persist(collection);
+        var item = Item.builder().id(UUID.randomUUID()).userId(user.getId()).collectionId(collection.getId())
+                .hasSchedule(true).startAt(Instant.parse("2026-11-12T08:30:15.987Z")).build();
+        entities.persist(item);
+        entities.flush();
+        entities.clear();
+
+        var fractions = entities.createNativeQuery("SELECT EXTRACT(MICROSECONDS FROM start_at)::bigint % 1000000, "
+                        + "EXTRACT(MICROSECONDS FROM created_at)::bigint % 1000000 FROM items WHERE id = ?1")
+                .setParameter(1, item.getId()).getSingleResult();
+        assertThat((Object[]) fractions).containsExactly(0L, 0L);
+        assertThat(entities.find(Item.class, item.getId()).getStartAt()).isEqualTo(Instant.parse("2026-11-12T08:30:15Z"));
     }
 }
