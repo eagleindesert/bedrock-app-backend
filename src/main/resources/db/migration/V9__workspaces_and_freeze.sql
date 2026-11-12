@@ -126,7 +126,9 @@ ALTER TABLE user_view_states ADD CONSTRAINT uq_user_view_states_view UNIQUE (wor
 -- =====================================================================
 -- 캘린더(CALENDAR_LAST_VIEW)와 시간표(TIMETABLE)가 각자 state_json.hiddenCollectionIds를 갖는다.
 -- 빈 목록이면 모두 보이므로 새 컬렉션은 보이는 채 생긴다.
--- 옮기는 값: 그 계정의 컬렉션 가운데 켠 목록에 없는 것. API v1.0의 뜻대로 []였다면 전부 끈 것이다.
+-- 옮기는 값: 켠 목록이 비어 있지 않은 계정의, 켠 목록에 없는 컬렉션.
+-- 켠 목록이 비어 있으면 옮기지 않는다(끈 목록 없음 = 모두 보임). 이 열을 쓴 클라이언트가 없어서
+-- 지금 DB의 []는 "모두 끔"이 아니라 "정한 적 없음"이다. 모두 끈 것으로 옮기면 배포 뒤 컬렉션이 모두 숨는다.
 INSERT INTO user_view_states (id, user_id, workspace_id, view_key, state_json)
 SELECT gen_random_uuid(), s.user_id, w.id, v.view_key, jsonb_build_object('hiddenCollectionIds', h.hidden)
 FROM user_settings s
@@ -138,7 +140,8 @@ CROSS JOIN LATERAL (
     WHERE c.user_id = s.user_id
       AND NOT (s.visible_collection_ids_json ? c.id::text)
 ) h
-WHERE h.hidden IS NOT NULL
+WHERE jsonb_array_length(s.visible_collection_ids_json) > 0
+  AND h.hidden IS NOT NULL
 ON CONFLICT (workspace_id, user_id, view_key)
 DO UPDATE SET state_json = user_view_states.state_json || EXCLUDED.state_json;
 
