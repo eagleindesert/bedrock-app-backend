@@ -12,6 +12,8 @@ import java.util.UUID;
  * 만들기 · 고치기 · 지우기 · 회차 예외 · 반복 나누기 · 미루기를 한 묶음(전부 아니면 없음)으로 실행하고,
  * (userId, batchId)로 재전송 중복 적용을 막는다. 같은 aiRequestId는 묶음 ID가 달라도 한 번만 완료한다.
  * 필드 구성은 「API 명세 합의 v1.0」의 BatchWriteRequest를 따른다.
+ * 묶음 안 연산이 칸을 바꾸면 그 칸의 lastWriteId와 item_field_writes.write_id에는 batchId가 아니라
+ * 그 연산의 operationId를 남긴다. 기기가 미리 정한 값이라 뒤 쓰기의 baseFieldVersions로 실을 수 있다.
  */
 public interface ItemBatchWritePort {
 
