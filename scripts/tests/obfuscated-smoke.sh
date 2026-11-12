@@ -49,6 +49,8 @@ services:
       DB_PASSWORD: smoke-only
       REDIS_HOST: redis
       COOKIE_SECURE: 'false'
+      # 픽스처에는 SMTP 서버가 없어 메일 헬스 체크가 항상 DOWN이므로 이 검증에서만 끈다.
+      MANAGEMENT_HEALTH_MAIL_ENABLED: 'false'
 EOF
 
 docker build --platform linux/amd64 -t "${IMAGE_NAME}" "${PROJECT_ROOT}"
