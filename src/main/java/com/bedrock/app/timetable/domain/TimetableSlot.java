@@ -40,6 +40,10 @@ public class TimetableSlot {
     @Column(name = "user_id", nullable = false)
     private UUID userId;
 
+    /** 속한 워크스페이스. 동기화 잠금 · 커서의 단위다(V9). */
+    @Column(name = "workspace_id", nullable = false)
+    private UUID workspaceId;
+
     @Column(name = "day_of_week", nullable = false)
     private Short dayOfWeek;
 

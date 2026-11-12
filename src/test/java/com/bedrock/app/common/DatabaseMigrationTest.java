@@ -45,7 +45,7 @@ class DatabaseMigrationTest extends PostgresIntegrationSupport {
                     + "WHERE table_schema='public' AND table_type='BASE TABLE' "
                     + "AND table_name <> 'flyway_schema_history'");
             rows.next();
-            assertThat(rows.getInt(1)).isEqualTo(31);
+            assertThat(rows.getInt(1)).isEqualTo(32);
             rows = sql.executeQuery("SELECT data_type FROM information_schema.columns "
                     + "WHERE table_schema='public' AND table_name='users' AND column_name='id'");
             rows.next();

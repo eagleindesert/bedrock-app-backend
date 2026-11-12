@@ -31,7 +31,8 @@ public class SystemNotification {
     @Column(name = "id", nullable = false)
     private UUID id;
 
-    @Column(name = "user_id")
+    /** 서버 공지도 사용자마다 한 줄이다(V9). */
+    @Column(name = "user_id", nullable = false)
     private UUID userId;
 
     @Column(name = "notification_type", nullable = false, length = 40)
@@ -40,8 +41,9 @@ public class SystemNotification {
     @Column(name = "payload_enc", nullable = false, columnDefinition = "text")
     private String payloadEnc;
 
-    @Generated(event = EventType.INSERT)
-    @Column(name = "sync_seq", nullable = false, insertable = false)
+    /** DB가 정한다: INSERT는 기본값, UPDATE는 V10 트리거. JPA는 쓰지 않고 다시 읽는다. */
+    @Generated(event = {EventType.INSERT, EventType.UPDATE})
+    @Column(name = "sync_seq", nullable = false, insertable = false, updatable = false)
     private Long syncSeq;
 
     @CreatedDate

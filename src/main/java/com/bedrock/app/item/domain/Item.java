@@ -1,13 +1,14 @@
 package com.bedrock.app.item.domain;
 
-import com.bedrock.app.common.domain.BaseTimeEntity;
 import com.bedrock.app.common.domain.SwatchColor;
 import com.bedrock.app.common.domain.TodoStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EntityListeners;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
@@ -18,26 +19,37 @@ import org.hibernate.annotations.Generated;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.generator.EventType;
 import org.hibernate.type.SqlTypes;
+import org.springframework.data.annotation.CreatedDate;
+import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
-/** 공통 명세의 items 저장 모델. 기능별 검증과 변경 연산은 담당 패키지에서 구현한다. */
+/**
+ * 공통 명세의 items 저장 모델. 기능별 검증과 변경 연산은 담당 패키지에서 구현한다.
+ * createdAt은 기기가 만든 시각이고(날짜 없는 아이템의 만든 날, F-26), serverCreatedAt은 서버 감사 시각이다(V9).
+ */
 @Entity
 @Table(name = "items")
 @Getter
 @Builder
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
-public class Item extends BaseTimeEntity {
+@EntityListeners(AuditingEntityListener.class)
+public class Item {
     @Id
     @Column(name = "id", nullable = false)
     private UUID id;
 
     @Column(name = "user_id", nullable = false)
     private UUID userId;
+
+    /** 속한 워크스페이스. 동기화 잠금 · 커서의 단위다(V9). */
+    @Column(name = "workspace_id", nullable = false)
+    private UUID workspaceId;
 
     @Column(name = "collection_id", nullable = false)
     private UUID collectionId;
@@ -135,7 +147,33 @@ public class Item extends BaseTimeEntity {
     @Column(name = "purge_after")
     private Instant purgeAfter;
 
-    @Generated(event = EventType.INSERT)
-    @Column(name = "sync_seq", nullable = false, insertable = false)
+    /** DB가 정한다: INSERT는 기본값, UPDATE는 V10 트리거. JPA는 쓰지 않고 다시 읽는다. */
+    @Generated(event = {EventType.INSERT, EventType.UPDATE})
+    @Column(name = "sync_seq", nullable = false, insertable = false, updatable = false)
     private Long syncSeq;
+
+    /** 기기가 만든 시각(ItemCreateSpec.createdAt). 비었거나 서버 시각보다 미래면 서버 시각이다. */
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private Instant createdAt;
+
+    /** 서버가 행을 넣은 시각. 감사용이다. */
+    @CreatedDate
+    @Column(name = "server_created_at", nullable = false, updatable = false)
+    private Instant serverCreatedAt;
+
+    @LastModifiedDate
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
+
+    /** 감사 리스너가 serverCreatedAt을 채운 뒤 불린다(JPA는 리스너를 엔티티 콜백보다 먼저 부른다). */
+    @PrePersist
+    void settleCreatedAt() {
+        createdAt = deviceCreatedAt(createdAt, serverCreatedAt);
+    }
+
+    /** 기기 시각을 받되 서버 시각보다 미래면 서버 시각으로 자른다. 없으면 서버 시각이다(결정 3). */
+    public static Instant deviceCreatedAt(Instant deviceTime, Instant serverTime) {
+        if (deviceTime == null || deviceTime.isAfter(serverTime)) return serverTime;
+        return deviceTime;
+    }
 }

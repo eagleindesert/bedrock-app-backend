@@ -34,6 +34,10 @@ public class ItemFieldVersion {
     @Column(name = "user_id", nullable = false)
     private UUID userId;
 
+    /** 속한 워크스페이스. 동기화 잠금 · 커서의 단위다(V9). */
+    @Column(name = "workspace_id", nullable = false)
+    private UUID workspaceId;
+
     /**
      * 마지막으로 반영한 쓰기. 처음 값이면 null(API의 baseFieldVersions null과 같다).
      * 단건 쓰기는 그 writeId, 묶음 안의 패치 · 지우기 · 미루기는 그 연산의 operationId를 남긴다. batchId는 남기지 않는다.

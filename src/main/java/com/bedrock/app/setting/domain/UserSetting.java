@@ -76,11 +76,6 @@ public class UserSetting {
     @Column(name = "ocr_server_consent", nullable = false)
     private boolean ocrServerConsent;
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "visible_collection_ids_json", nullable = false, columnDefinition = "jsonb")
-    @Builder.Default
-    private List<UUID> visibleCollectionIdsJson = List.of();
-
     /**
      * 종류별 기본 알림(F-41 · F-46). 키는 timedEvent · allDayEvent · timedTodo · dateOnlyTodo,
      * 값은 아이템 알람 칸과 같은 "기준 시각 몇 분 전" 목록이다. 서버는 저장만 하고 채우는 일은 기기가 한다.
@@ -90,8 +85,9 @@ public class UserSetting {
     @Builder.Default
     private Map<String, List<Integer>> defaultAlarmsJson = INITIAL_DEFAULT_ALARMS;
 
-    @Generated(event = EventType.INSERT)
-    @Column(name = "sync_seq", nullable = false, insertable = false)
+    /** DB가 정한다: INSERT는 기본값, UPDATE는 V10 트리거. JPA는 쓰지 않고 다시 읽는다. */
+    @Generated(event = {EventType.INSERT, EventType.UPDATE})
+    @Column(name = "sync_seq", nullable = false, insertable = false, updatable = false)
     private Long syncSeq;
 
     @LastModifiedDate

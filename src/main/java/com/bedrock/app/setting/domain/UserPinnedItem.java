@@ -13,6 +13,7 @@ import org.hibernate.annotations.Generated;
 import org.hibernate.generator.EventType;
 
 import java.time.Instant;
+import java.util.UUID;
 
 /** 공통 명세의 user_pinned_items 저장 모델. 기능별 검증과 변경 연산은 담당 패키지에서 구현한다. */
 @Entity
@@ -25,11 +26,16 @@ public class UserPinnedItem {
     @EmbeddedId
     private UserPinnedItemId id;
 
+    /** 속한 워크스페이스. 동기화 잠금 · 커서의 단위다(V9). */
+    @Column(name = "workspace_id", nullable = false)
+    private UUID workspaceId;
+
     @Column(name = "pinned_at", nullable = false)
     @Builder.Default
     private Instant pinnedAt = Instant.now();
 
-    @Generated(event = EventType.INSERT)
-    @Column(name = "sync_seq", nullable = false, insertable = false)
+    /** DB가 정한다: INSERT는 기본값, UPDATE는 V10 트리거. JPA는 쓰지 않고 다시 읽는다. */
+    @Generated(event = {EventType.INSERT, EventType.UPDATE})
+    @Column(name = "sync_seq", nullable = false, insertable = false, updatable = false)
     private Long syncSeq;
 }

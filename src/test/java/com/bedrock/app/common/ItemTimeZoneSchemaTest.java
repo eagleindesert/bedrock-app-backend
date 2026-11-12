@@ -23,14 +23,18 @@ class ItemTimeZoneSchemaTest extends PostgresIntegrationSupport {
         UUID collection = UUID.randomUUID();
         try (Connection connection = connection(); Statement sql = connection.createStatement()) {
             sql.execute("INSERT INTO users (id, email, name, status) VALUES ('" + user + "', 'tz@example.com', 'tz', 'ACTIVE')");
-            sql.execute("INSERT INTO collections (id, user_id, name_enc, color, icon) VALUES ('"
-                    + collection + "', '" + user + "', 'enc', 'BLUE', 'calendar')");
+            // V9부터 아이템 · 컬렉션은 워크스페이스에 속한다.
+            String workspaceColumn = ", workspace_id";
+            String workspaceValue = ", '" + workspace(sql, user) + "'";
+            sql.execute("INSERT INTO collections (id, user_id, name_enc, color, icon" + workspaceColumn + ") VALUES ('"
+                    + collection + "', '" + user + "', 'enc', 'BLUE', 'calendar'" + workspaceValue + ")");
 
-            sql.execute("INSERT INTO items (id, user_id, collection_id, has_todo, todo_status, time_zone, due_date) VALUES ('"
-                    + UUID.randomUUID() + "', '" + user + "', '" + collection + "', TRUE, 'TODO', 'Asia/Seoul', '2026-11-20')");
+            sql.execute("INSERT INTO items (id, user_id, collection_id, has_todo, todo_status, time_zone, due_date" + workspaceColumn
+                    + ") VALUES ('" + UUID.randomUUID() + "', '" + user + "', '" + collection + "', TRUE, 'TODO', 'Asia/Seoul', '2026-11-20'"
+                    + workspaceValue + ")");
             assertThatThrownBy(() -> sql.execute("INSERT INTO items (id, user_id, collection_id, has_todo, todo_status, "
-                    + "due_at, due_date) VALUES ('" + UUID.randomUUID() + "', '" + user + "', '" + collection
-                    + "', TRUE, 'TODO', '2026-11-20T14:59:59Z', '2026-11-20')"))
+                    + "due_at, due_date" + workspaceColumn + ") VALUES ('" + UUID.randomUUID() + "', '" + user + "', '" + collection
+                    + "', TRUE, 'TODO', '2026-11-20T14:59:59Z', '2026-11-20'" + workspaceValue + ")"))
                     .isInstanceOf(SQLException.class).hasMessageContaining("ck_items_due_at_or_due_date");
 
             assertThatThrownBy(() -> sql.execute("INSERT INTO user_settings (user_id) VALUES ('" + user + "')"))
@@ -40,6 +44,12 @@ class ItemTimeZoneSchemaTest extends PostgresIntegrationSupport {
             assertThat(rows.next()).isTrue();
             assertThat(rows.getString(1)).isEqualTo("America/Los_Angeles");
         }
+    }
+
+    private static UUID workspace(Statement sql, UUID user) throws SQLException {
+        var id = UUID.randomUUID();
+        sql.execute("INSERT INTO workspaces (id, owner_user_id) VALUES ('" + id + "', '" + user + "')");
+        return id;
     }
 
     private Connection connection() throws Exception {

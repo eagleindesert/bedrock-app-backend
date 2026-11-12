@@ -5,6 +5,7 @@ import com.bedrock.app.collection.domain.Collection;
 import com.bedrock.app.common.auth.SessionPrincipal;
 import com.bedrock.app.common.domain.SwatchColor;
 import com.bedrock.app.item.domain.Item;
+import com.bedrock.app.sync.domain.Workspace;
 import com.bedrock.app.support.PostgresIntegrationSupport;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -78,14 +79,16 @@ class AppApplicationTests extends PostgresIntegrationSupport {
     @Test
     @Transactional
     void canonicalEntitiesMatchDdlAndReceiveAuditTimesAndSyncSequences() {
-        assertThat(entities.getMetamodel().getEntities()).hasSize(31);
+        assertThat(entities.getMetamodel().getEntities()).hasSize(32);
         var user = User.builder().id(UUID.randomUUID()).email("model@example.com")
                 .name("Model test").status("ACTIVE").build();
         entities.persist(user);
-        var collection = Collection.builder().id(UUID.randomUUID()).userId(user.getId())
+        var workspace = Workspace.builder().id(UUID.randomUUID()).ownerUserId(user.getId()).build();
+        entities.persist(workspace);
+        var collection = Collection.builder().id(UUID.randomUUID()).userId(user.getId()).workspaceId(workspace.getId())
                 .nameEnc("ciphertext-fixture").color(SwatchColor.BLUE).icon("folder").build();
         entities.persist(collection);
-        var item = Item.builder().id(UUID.randomUUID()).userId(user.getId())
+        var item = Item.builder().id(UUID.randomUUID()).userId(user.getId()).workspaceId(workspace.getId())
                 .collectionId(collection.getId()).build();
         entities.persist(item);
         entities.flush();
@@ -101,10 +104,12 @@ class AppApplicationTests extends PostgresIntegrationSupport {
         var user = User.builder().id(UUID.randomUUID()).email("seconds@example.com")
                 .name("Seconds test").status("ACTIVE").build();
         entities.persist(user);
-        var collection = Collection.builder().id(UUID.randomUUID()).userId(user.getId())
+        var workspace = Workspace.builder().id(UUID.randomUUID()).ownerUserId(user.getId()).build();
+        entities.persist(workspace);
+        var collection = Collection.builder().id(UUID.randomUUID()).userId(user.getId()).workspaceId(workspace.getId())
                 .nameEnc("ciphertext-fixture").color(SwatchColor.BLUE).icon("folder").build();
         entities.persist(collection);
-        var item = Item.builder().id(UUID.randomUUID()).userId(user.getId()).collectionId(collection.getId())
+        var item = Item.builder().id(UUID.randomUUID()).userId(user.getId()).workspaceId(workspace.getId()).collectionId(collection.getId())
                 .hasSchedule(true).startAt(Instant.parse("2026-11-12T08:30:15.987Z")).build();
         entities.persist(item);
         entities.flush();
@@ -115,5 +120,36 @@ class AppApplicationTests extends PostgresIntegrationSupport {
                 .setParameter(1, item.getId()).getSingleResult();
         assertThat((Object[]) fractions).containsExactly(0L, 0L);
         assertThat(entities.find(Item.class, item.getId()).getStartAt()).isEqualTo(Instant.parse("2026-11-12T08:30:15Z"));
+    }
+
+    @Test
+    @Transactional
+    void itemKeepsDeviceCreatedAtAndJpaRereadsTriggerSyncSeq() {
+        var user = User.builder().id(UUID.randomUUID()).email("device-time@example.com")
+                .name("Device time").status("ACTIVE").build();
+        entities.persist(user);
+        var workspace = Workspace.builder().id(UUID.randomUUID()).ownerUserId(user.getId()).build();
+        entities.persist(workspace);
+        var collection = Collection.builder().id(UUID.randomUUID()).userId(user.getId()).workspaceId(workspace.getId())
+                .nameEnc("ciphertext-fixture").color(SwatchColor.BLUE).icon("folder").build();
+        entities.persist(collection);
+        var offline = Item.builder().id(UUID.randomUUID()).userId(user.getId()).workspaceId(workspace.getId())
+                .collectionId(collection.getId()).createdAt(Instant.parse("2026-11-01T09:00:00Z")).build();
+        var future = Item.builder().id(UUID.randomUUID()).userId(user.getId()).workspaceId(workspace.getId())
+                .collectionId(collection.getId()).createdAt(Instant.parse("2999-01-01T00:00:00Z")).build();
+        entities.persist(offline);
+        entities.persist(future);
+        entities.flush();
+
+        assertThat(offline.getCreatedAt()).isEqualTo(Instant.parse("2026-11-01T09:00:00Z"));
+        assertThat(offline.getServerCreatedAt()).isAfter(offline.getCreatedAt());
+        assertThat(future.getCreatedAt()).isEqualTo(future.getServerCreatedAt());
+
+        // 번호는 트리거가 정하고(sync_seq를 직접 넣어도 무시된다), 엔티티는 새 번호를 다시 읽는다.
+        long inserted = collection.getSyncSeq();
+        entities.createNativeQuery("UPDATE collections SET icon = 'star', sync_seq = 1 WHERE id = ?1")
+                .setParameter(1, collection.getId()).executeUpdate();
+        entities.refresh(collection);
+        assertThat(collection.getSyncSeq()).isGreaterThan(inserted);
     }
 }
