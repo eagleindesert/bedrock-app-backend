@@ -96,7 +96,7 @@ public class PortStubAutoConfiguration {
     public WorkspaceLifecyclePort workspaceLifecyclePort() {
         return new WorkspaceLifecyclePort() {
             @Override
-            public UUID initializeWorkspaceForNewUser(UUID userId) { throw unavailable(); }
+            public UUID initializeWorkspaceForNewUser(UUID userId, String timeZone) { throw unavailable(); }
 
             @Override
             public void purgeAllWorkspaceDataForUser(UUID userId) { throw unavailable(); }

@@ -47,6 +47,10 @@ public class UserSetting {
     @Builder.Default
     private Short dayStartHour = (short) 7;
 
+    /** 계정의 기본 IANA 시간대. 새 아이템이 받는 값이고, 처음 값은 가입한 기기의 시간대다. 기본값을 두지 않는다. */
+    @Column(name = "time_zone", nullable = false, length = 64)
+    private String timeZone;
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "density_json", nullable = false, columnDefinition = "jsonb")
     @Builder.Default

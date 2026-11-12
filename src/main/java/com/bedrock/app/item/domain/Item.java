@@ -70,6 +70,10 @@ public class Item extends BaseTimeEntity {
     @Column(name = "is_all_day", nullable = false)
     private boolean isAllDay;
 
+    /** IANA 시간대. 시각 값 · 반복 회차 날짜 · 날짜 없는 아이템의 만든 날을 이 시간대로 정한다. null이면 떠 있는 시각. */
+    @Column(name = "time_zone", length = 64)
+    private String timeZone;
+
     @Column(name = "location_enc", columnDefinition = "text")
     private String locationEnc;
 
@@ -83,8 +87,13 @@ public class Item extends BaseTimeEntity {
     @Column(name = "completed_at")
     private Instant completedAt;
 
+    /** 시각을 고른 마감. dueDate와 함께 있을 수 없다. */
     @Column(name = "due_at")
     private Instant dueAt;
+
+    /** 날짜만 고른 마감. 모든 시간대에서 같은 날에 선다. dueAt과 함께 있을 수 없다. */
+    @Column(name = "due_date")
+    private LocalDate dueDate;
 
     @Column(name = "priority")
     private Short priority;

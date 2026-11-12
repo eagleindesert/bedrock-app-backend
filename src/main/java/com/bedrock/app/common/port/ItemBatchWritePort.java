@@ -34,7 +34,10 @@ public interface ItemBatchWritePort {
             PendingInboxCompletion pendingInboxCompletion // 정리 대기 재시도 완료일 때(F-49)
     ) {}
 
-    /** 반복 회차의 정체성. 시간표 회차는 slotId까지, 일반 반복은 slotId가 null이다. */
+    /**
+     * 반복 회차의 정체성. 시간표 회차는 slotId까지, 일반 반복은 slotId가 null이다.
+     * recurrenceDate는 마스터 아이템 시간대(timeZone)의 날짜다. 시간표 회차는 시간대 없는 요일의 날짜다.
+     */
     record OccurrenceRef(UUID masterItemId, LocalDate recurrenceDate, UUID slotId) {}
 
     record ItemTarget(UUID itemId, OccurrenceRef occurrence) {}
@@ -90,6 +93,7 @@ public interface ItemBatchWritePort {
 
     record CollectionCreateSpec(UUID collectionId, String name, String color, String icon) {}
 
+    /** rdates · exdates · untilDate · effectiveFrom은 마스터 아이템 시간대(timeZone)의 날짜다. */
     record RecurrenceSpec(
             String rrule,
             List<LocalDate> rdates,
