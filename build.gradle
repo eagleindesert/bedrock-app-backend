@@ -111,6 +111,8 @@ tasks.register('obfuscateClasses', JavaExec) {
 tasks.register('unpackObfuscatedClasses', Sync) {
 	dependsOn tasks.named('obfuscateClasses')
 	from { zipTree(obfuscatedClasses.get().asFile) }
+	// 중간 JAR의 매니페스트는 BootJar가 만드는 실행 매니페스트와 겹치므로 풀지 않는다.
+	exclude 'META-INF/MANIFEST.MF'
 	into obfuscatedDirectory
 }
 
@@ -118,6 +120,11 @@ tasks.register('bootJarObfuscate', org.springframework.boot.gradle.tasks.bundlin
 	dependsOn tasks.named('unpackObfuscatedClasses'), tasks.named('processResources')
 	archiveFileName = 'app-obfuscated.jar'
 	mainClass = 'com.bedrock.app.AppApplication'
-	classpath = files(obfuscatedDirectory, sourceSets.main.output.resourcesDir) +
-		(configurations.runtimeClasspath - configurations.developmentOnly)
+	// 직접 등록한 BootJar에는 Boot 플러그인이 기본 bootJar에만 채우는 값이 없으므로 같은 출처로 채운다.
+	// targetJavaVersion이 비면 Boot 4에서 이 태스크가 실패하고, resolvedArtifacts는 layers.idx 분류에 쓰인다.
+	targetJavaVersion = provider { java.targetCompatibility }
+	resolvedArtifacts(configurations.productionRuntimeClasspath.incoming.artifacts.resolvedArtifacts)
+	// 기본 bootJar의 클래스패스(개발 전용 의존성과 빈 starter JAR 제외)를 그대로 쓰고, 컴파일된 클래스만 난독화본으로 바꾼다.
+	classpath = files(obfuscatedDirectory) +
+		(tasks.named('bootJar').get().classpath - sourceSets.main.output.classesDirs)
 }

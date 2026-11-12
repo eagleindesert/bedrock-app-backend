@@ -32,8 +32,9 @@ spring:
       password: ${REDIS_PASSWORD:}
   session:
     timeout: 30m
-    redis:
-      namespace: bedrock:session:v2
+    data:
+      redis:
+        namespace: bedrock:session:v2
   mail:
     host: ${SMTP_HOST:localhost}
     port: ${SMTP_PORT:587}
