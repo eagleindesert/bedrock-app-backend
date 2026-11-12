@@ -31,6 +31,13 @@ import java.util.UUID;
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 @EntityListeners(AuditingEntityListener.class)
 public class UserSetting {
+    /** 가입 때의 기본 알림. V8 마이그레이션의 열 기본값과 같다. */
+    public static final Map<String, List<Integer>> INITIAL_DEFAULT_ALARMS = Map.of(
+            "timedEvent", List.of(10),
+            "allDayEvent", List.of(0),
+            "timedTodo", List.of(0),
+            "dateOnlyTodo", List.of(0));
+
     @Id
     @Column(name = "user_id", nullable = false)
     private UUID userId;
@@ -73,6 +80,15 @@ public class UserSetting {
     @Column(name = "visible_collection_ids_json", nullable = false, columnDefinition = "jsonb")
     @Builder.Default
     private List<UUID> visibleCollectionIdsJson = List.of();
+
+    /**
+     * 종류별 기본 알림(F-41 · F-46). 키는 timedEvent · allDayEvent · timedTodo · dateOnlyTodo,
+     * 값은 아이템 알람 칸과 같은 "기준 시각 몇 분 전" 목록이다. 서버는 저장만 하고 채우는 일은 기기가 한다.
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "default_alarms_json", nullable = false, columnDefinition = "jsonb")
+    @Builder.Default
+    private Map<String, List<Integer>> defaultAlarmsJson = INITIAL_DEFAULT_ALARMS;
 
     @Generated(event = EventType.INSERT)
     @Column(name = "sync_seq", nullable = false, insertable = false)

@@ -14,6 +14,7 @@
 | 아이템 시간대 · 날짜 마감 | `V7__item_time_zone_and_due_date.sql`: `items.time_zone` · `items.due_date`(`due_at`과 배타), `user_settings.time_zone`, `ItemTimeZones` · `@IanaTimeZone` (`공통-파일.md` 2.5) |
 | 새 저장 모델 | 담당별 domain 패키지의 31개 JPA 엔티티, 고정 아이템 · 묶음 요청 · 묶음 결과 · 칸 버전 · 쓰기 기록의 복합 키 |
 | 이력 보존과 전환 | V1~V3 불변, V4는 구형 데이터 유무 검사 후 빈 구형 테이블만 제거 |
+| 종류별 기본 알림 | `V8__user_settings_default_alarms.sql`: `user_settings.default_alarms_json`(네 종류, 가입 때 기본값, CHECK) (`공통-파일.md` 2.6) |
 | Flyway + JPA 검증 | `application.yml`: validate, out-of-order, UTC, open-in-view 비활성화 |
 | 공통 응답·페이지 | `ApiResponse`, `CursorPageResponse`, `ApiResponseAdvice` |
 | 오류 계약 | `ErrorCode`, `BusinessException`, 담당별 Enum 3개, `GlobalExceptionHandler` |
