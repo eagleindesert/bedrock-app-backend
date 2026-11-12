@@ -15,6 +15,10 @@ public interface ScheduleMutationPort {
     /** 같은 컬렉션 · 겹치는 기간의 시간표 마스터와 시간대가 겹치면 TIMETABLE_SLOT_OVERLAP으로 거절한다. */
     void validateAndSaveTimetable(UUID userId, UUID itemId, UUID collectionId, ItemBatchWritePort.TimetableSpec timetable);
 
+    /**
+     * spec.rrule은 RecurrenceRule이 받는 꼴(n일마다 · 매주 · 매월 · 매년 같은 날짜)이어야 하고,
+     * 기준 날짜(시작, 없으면 마감)와 맞아야 한다. 아니면 WRITE_REJECTED_VALIDATION으로 거절한다.
+     */
     void saveRecurrenceRule(UUID userId, UUID itemId, ItemBatchWritePort.RecurrenceSpec spec);
 
     UUID applyOccurrenceException(UUID userId, ItemBatchWritePort.OccurrenceRef occurrence,

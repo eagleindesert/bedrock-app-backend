@@ -18,6 +18,7 @@
 | 공통 응답·페이지 | `ApiResponse`, `CursorPageResponse`, `ApiResponseAdvice` |
 | 오류 계약 | `ErrorCode`, `BusinessException`, 담당별 Enum 3개, `GlobalExceptionHandler` |
 | 공통 도메인 | `BaseTimeEntity`, `SwatchColor`, `TodoStatus`, `LinkType` |
+| 반복 규칙 꼴 | `RecurrenceRule`: n일마다 · 매주 · 매월 · 매년 같은 날짜, 없는 날 건너뛰기(RFC 5545), 회차 날짜 계산 (`공통-파일.md` 4.4) |
 | 담당 간 호출 | `common.port`의 5개 인터페이스와 DTO |
 | 초기 Stub | `PortStubAutoConfiguration`: 구현 빈이 없을 때 등록, 호출 시 503 |
 | 세션 사용자 | `@CurrentUser SessionPrincipal`, UUID 계정·기기, Redis 직렬화 |
