@@ -1,0 +1,2115 @@
+# 공통 파일
+
+# 0. 문서 정보
+
+| 항목      | 내용                                                                                                                                                                                                                          |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 기준      | 뉴 기능 명세 2026-11-01판 · FE/BE 기능 분배안 · BE 3인 작업 분배안 · 배포 정형화 요구사항 · API 명세 합의 v1.0(2026-11-10, 2.4의 V6 보정) · 뉴 기능 명세 v0.0.6(2026-11-12, 2.5 · 2.6) · 공통 기반 고정 결정(2026-11-12, 2.7) |
+| 기술 스택 | Java 21+ · Spring Boot 4 · Spring Data JPA (`ddl-auto: validate`) · Flyway · PostgreSQL · Spring Session + Redis · Docker (Ubuntu 24.04 LTS x86_64 + Host Nginx)                                                              |
+| 목적      | BE 3명(BE 1 · BE 2 · BE 3)이 AI 코딩 도구로 동시에 개발할 때 Git 충돌이 나지 않도록, 코딩 시작 전에 먼저 확정해 `main` 브랜치에 올리는 공통 파일 명세다                                                                       |
+| 사용법    | 1단계에서 이 문서의 SQL · 설정 · 공통 클래스 · 내부 인터페이스 · 배포 스크립트를 먼저 `main`에 머지한 뒤, 세 사람이 각자 맡은 패키지 안에서만 작업한다. 코드 · 설정 사본은 리포의 실제 파일과 글자 그대로 같다                |
+
+---
+
+# 1. 패키지(폴더) 구조와 독점 소유 규칙
+
+AI에게 작업을 지시할 때는 **"내가 맡은 패키지 안의 파일만 만들고 고치며, `common` 패키지와 배포 파일은 고치지 않는다"**를 원칙으로 둔다.
+
+```
+bedrock-app-backend/
+├── Dockerfile                          # [공통] 멀티스테이지 빌드 + 바이트코드 난독화(평문 소스 제외)
+├── proguard.pro                        # [공통] Spring Boot 바이트코드 난독화 규칙
+├── build.gradle                        # [공통] 의존성 · bootJarObfuscate 태스크
+├── docker-compose.yaml                 # [공통] 개발 인프라(PostgreSQL · Redis · 관리 도구, app 프로필로 백엔드)
+├── docker-compose-deployment.yaml      # [공통] 배포용 Compose(Docker Hub 이미지 pull 방식)
+├── .env.example                        # [공통] 배포 환경변수 템플릿(배포 시 .env로 복사)
+├── start.sh                            # [공통] 프로젝트 루트 배포 실행 스크립트(버전 인자 pull & up -d)
+├── scripts/
+│   ├── build-push.sh                   # [공통] x86_64 이미지 빌드 및 buildx 자동 재시작 방지
+│   └── tests/                          # [공통] 배포 스크립트 · 난독화 이미지 스모크 검증
+└── src/main/
+    ├── resources/
+    │   ├── application.yml             # [공통] 서버 · DB · Flyway · JPA(validate) · Redis 설정
+    │   ├── application-local.yml       # [공통] bootRun 기본 프로필(.env 읽기 · 로컬 쿠키 · API 문서 열기)
+    │   ├── logback-spring.xml          # [공통] 엔드포인트 접근 로그 출력 및 20MB 단위 .gz 압축 롤링 보관
+    │   └── db/migration/               # [공통 V1~V100 · 담당 V101~] 2.1 참고. 적용된 파일은 고치지 않는다
+    │       ├── V1__init.sql ~ V3__normalize_constraint_names.sql   # 옛 모델(체크섬 보존용, 고치지 않음)
+    │       ├── V4__replace_legacy_schema.sql                       # 옛 모델 정리(데이터가 있으면 중단)
+    │       ├── V5__init_workspace_schema.sql                       # 전체 초기 스키마(2.3)
+    │       └── V6__…sql ~ V10__…sql                                # 공통 보정(2.4 ~ 2.7)
+    └── java/com/bedrock/app/
+        ├── AppApplication.java
+        ├── common                      # [공통, 공통 기반 변경 요청이 아니면 고치지 않음]
+        │   ├── config                  # Security, Session, CORS, Jackson, Async, Persistence, Password, OpenApi, PortStub 설정
+        │   ├── filter                  # EndpointAccessLogFilter(IP·메서드·라우트 로깅 및 민감값 차단), WebTabAccountFilter
+        │   ├── auth                    # @CurrentUser, SessionPrincipal, SessionAuthenticationService, CsrfController
+        │   ├── response                # ApiResponse<T>, CursorPageResponse<T>, ApiResponseAdvice
+        │   ├── error                   # ErrorCode(공통 인터페이스), BusinessException, GlobalExceptionHandler, CommonErrorCode
+        │   │   ├── Be1AuthAiErrorCode.java   # BE 1 전용 에러 코드 Enum
+        │   │   ├── Be2SyncItemErrorCode.java # BE 2 전용 에러 코드 Enum
+        │   │   └── Be3ScheduleErrorCode.java # BE 3 전용 에러 코드 Enum
+        │   ├── domain                  # BaseTimeEntity, 공통 Enum(SwatchColor, TodoStatus, LinkType), FieldKeys, ItemTimeZones, RecurrenceRule, InstantSecondsConverter
+        │   ├── validation              # @IanaTimeZone
+        │   └── port                    # 담당 간 내부 호출 인터페이스 (4장)
+        │       ├── UserCryptoPort.java         # BE 1 구현 → BE 2 · 3 호출
+        │       ├── ItemBatchWritePort.java     # BE 2 구현 → BE 1 · 3 호출
+        │       ├── ConflictRegistryPort.java   # BE 2 구현 → BE 3 호출
+        │       ├── ScheduleMutationPort.java   # BE 3 구현 → BE 2 호출
+        │       └── WorkspaceLifecyclePort.java # BE 2 · 3 구현 → BE 1 호출
+        │
+        ├── home                        # [공통] 루트 경로 안내
+        │
+        ├── auth                        # [BE 1 독점] F-01 ~ F-06 (가입 · 로그인 · 재설정 · 기기 · 탈퇴 · 내가 아니다)
+        ├── mail                        # [BE 1 독점] F-04 · 4.7 (메일 코드 · SMTP · 한도 · 반송)
+        ├── crypto                      # [BE 1 독점] 4.4 (사용자별 데이터 키 · KMS 봉투 암호화)
+        ├── ai                          # [BE 1 독점] F-43(AI 중계) · F-47(되묻기)
+        ├── conversation                # [BE 1 독점] F-50 (대화 기록)
+        ├── ocr                         # [BE 1 독점] F-34 (시간표 캡처 서버 인식)
+        │
+        ├── item                        # [BE 2 독점] F-12 · F-13 · F-17 · F-20 · F-21 · F-41 · F-49
+        ├── link                        # [BE 2 독점] F-16 · F-22 (아이템 연결 · 위키링크 언급)
+        ├── sync                        # [BE 2 독점] F-44 (워크스페이스 · 받기 · 바뀐 것 받기 · 칸 단위 합치기)
+        ├── conflict                    # [BE 2 독점] F-45 (진 쓰기 후보 보관 · 충돌 내려주기 · 고르기)
+        ├── batch                       # [BE 2 독점] F-43(묶음 쓰기 틀 · 재전송 중복 방지 · 상태 조회)
+        ├── undo                        # [BE 2 독점] F-11 · F-48 (칸별 마지막 쓰기 추적 · 요청별 되돌리기)
+        │
+        ├── collection                  # [BE 3 독점] F-38 · F-40 (컬렉션 · 기본 컬렉션 · 일괄 선택)
+        ├── setting                     # [BE 3 독점] F-09 · F-26 · F-37 · F-46 · F-51 · F-52 (입력 시드 · 설정 · 보기 상태)
+        ├── trash                       # [BE 3 독점] F-15 (소프트 삭제 · 휴지통 · 되살리기 · 30일 물리 삭제)
+        ├── recurrence                  # [BE 3 독점] F-18 · F-23 · F-24 (반복 · 회차 예외 · 마스터 나누기 · 미루기)
+        ├── timetable                   # [BE 3 독점] F-30 · F-31 · F-33 (시간표 · 만드는 페이지 · 주 경계 나누기)
+        └── ics                         # [BE 3 독점] F-42 (ICS 가져오기와 내보내기)
+```
+
+---
+
+# 2. 전체 DB 스키마와 Flyway 동기화 규칙 (`V5__init_workspace_schema.sql`과 공통 보정 · PostgreSQL)
+
+## 2.1 로컬 · 클라우드 스키마 동기화 규칙 (Flyway + JPA `validate`)
+
+1. **Flyway + `ddl-auto: validate` 강제:** 로컬과 클라우드(배포 VM) 환경의 DB 스키마 괴리를 막기 위해 모든 스키마 변경은 **Flyway(`classpath:db/migration`)**로만 관리하고, Spring JPA 옵션은 \*\*`spring.jpa.hibernate.ddl-auto: validate`로 고정해 엔티티와 실제 DB 테이블이 어긋나면 애플리케이션 기동 시 즉시 검출한다.
+2. **초기 스키마 고정:** 전체 테이블은 `V5__init_workspace_schema.sql` 하나로 확정했다(2.3). 옛 모델의 `V1__init.sql` · `V2__align_action_schema.sql` · `V3__normalize_constraint_names.sql`은 체크섬을 지키려고 남겨 두고, `V4__replace_legacy_schema.sql`이 옛 테이블을 정리한다(옛 데이터가 있으면 지우지 않고 중단). 한 번 `main`에 올라간 마이그레이션 파일은 절대 고치지 않는다(체크섬 불일치 방지).
+3. **번호 대역 (`out-of-order: true`):** 기존 파일을 고치지 않고 새 마이그레이션 파일을 더한다. 파일 번호가 겹치지 않도록 대역을 나눈다.
+   - **공통:** `V1` ~ `V100`. V1~V5는 위와 같고, V6부터는 공통 기반 보정이다(지금 V6 ~ V10, 2.4 ~ 2.7). 공통 기반 변경 요청으로만 더한다.
+   - **BE 1:** `V101__...sql`, `V102__...sql` (`users` · `mail_codes` · `conversations` 등)
+   - **BE 2:** `V201__...sql`, `V202__...sql` (`items` · `item_links` · `conflict_candidates` · `batch_requests` 등)
+   - **BE 3:** `V301__...sql`, `V302__...sql` (`collections` · `user_settings` · `item_recurrences` · `timetable_slots` 등)
+
+## 2.2 테이블 소유권 요약
+
+| 담당     | 소유 테이블                                                                                                                                                                                                                                                                        |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **BE 1** | `users` · `user_oauth_accounts` · `user_devices` · `not_me_tokens` · `mail_codes` · `mail_bounces` · `user_data_keys` · `ai_pending_requests` · `conversations`                                                                                                                    |
+| **BE 2** | `items` · `item_links` · `item_field_versions` · `conflict_candidates` · `batch_requests` · `system_notifications` · `deletion_audit_logs` · `write_requests` · `sync_tombstones` · `item_field_writes` · `batch_results` · `workspaces`(V9, 만드는 일은 `WorkspaceLifecyclePort`) |
+| **BE 3** | `input_screen_configs` · `collections` · `user_settings` · `user_view_states` · `user_pinned_items` · `trash_bundles` · `item_recurrences` · `item_exceptions` · `timetable_slots` · `ics_import_records` · `item_timetables`                                                      |
+
+## 2.3 전체 초기 마이그레이션 (`src/main/resources/db/migration/V5__init_workspace_schema.sql`)
+
+처음 판의 전체 스키마다. 그 뒤의 공통 보정은 2.4 ~ 2.7에 차례로 있다(V6 ~ V10). 지금 스키마는 이 파일에 그 보정을 차례로 얹은 것이다.
+
+```sql
+-- 공통-파일.md 2026-11-01 공통 스키마. V1~V3 체크섬을 보존하기 위해 V5로 도입한다.
+-- =====================================================================
+-- 0. 공통 시퀀스 (F-44 워크스페이스 증분 동기화용 단조 증가 번호)
+-- =====================================================================
+CREATE SEQUENCE IF NOT EXISTS workspace_sync_seq START WITH 1 INCREMENT BY 1;
+
+-- =====================================================================
+-- 1. BE 1 소유 테이블 (계정 · 인증 · 메일 · 암호화 키 · AI · 대화 기록)
+-- =====================================================================
+
+-- F-01, F-02, F-03, F-06: 사용자 계정
+CREATE TABLE IF NOT EXISTS users (
+    id                  UUID PRIMARY KEY,
+    email               VARCHAR(320) NOT NULL UNIQUE,   -- 소문자 정규화 저장(F-02)
+    name                VARCHAR(100) NOT NULL,          -- 메일 발송용 평문(4.4)
+    password_hash       TEXT NULL,                      -- Argon2id 해시(4.3), 소셜 전용은 NULL
+    status              VARCHAR(30) NOT NULL,           -- PENDING_VERIFICATION | ACTIVE | DELETION_PENDING
+    failed_login_count  INT NOT NULL DEFAULT 0,         -- 10회 일시 잠금, 100회 재설정 필요(F-02)
+    locked_until        TIMESTAMPTZ NULL,
+    deleted_at          TIMESTAMPTZ NULL,               -- 탈퇴 소프트 삭제 시각(F-06)
+    purge_after         TIMESTAMPTZ NULL,               -- deleted_at + 30일(F-06)
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- F-02, F-05, F-06: 구글 · Apple 연결 계정
+CREATE TABLE IF NOT EXISTS user_oauth_accounts (
+    id                      UUID PRIMARY KEY,
+    user_id                 UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider                VARCHAR(20) NOT NULL,       -- GOOGLE | APPLE
+    provider_subject        VARCHAR(255) NOT NULL,      -- 제공자 계정 고유 id(F-02)
+    provider_email          VARCHAR(320) NOT NULL,
+    apple_refresh_token_enc TEXT NULL,                  -- 탈퇴 시 Apple 토큰 해지용(F-06)
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (provider, provider_subject)
+);
+
+-- F-02, F-05: 로그인한 기기 목록과 세션 매핑
+CREATE TABLE IF NOT EXISTS user_devices (
+    id                      UUID PRIMARY KEY,
+    user_id                 UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id_hash          VARCHAR(128) NOT NULL,      -- Keychain/쿠키 기기 id 해시(F-05)
+    session_id              VARCHAR(128) NULL,          -- Redis 세션 id
+    platform                VARCHAR(20) NOT NULL,       -- IOS | IPADOS | WEB
+    model_name              VARCHAR(100) NULL,          -- 기기가 보낸 모델명(글자로만 표시, F-05)
+    remember_me             BOOLEAN NOT NULL DEFAULT FALSE,
+    last_active_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    revoked_at              TIMESTAMPTZ NULL,           -- 기기 끊기 시각(F-05)
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_user_devices_user_id ON user_devices(user_id);
+
+-- F-05: 새 제공자 연결 알림 메일의 "내가 아니다" 링크 (1회용 · 7일 만료)
+CREATE TABLE IF NOT EXISTS not_me_tokens (
+    id                  UUID PRIMARY KEY,
+    user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    oauth_account_id    UUID NOT NULL REFERENCES user_oauth_accounts(id) ON DELETE CASCADE,
+    token_hmac          VARCHAR(128) NOT NULL UNIQUE,
+    expires_at          TIMESTAMPTZ NOT NULL,
+    used_at             TIMESTAMPTZ NULL,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- F-04: 메일 코드 (6자리 · 세션과 일에 묶임 · 10분 수명 · 5회 실패 · HMAC 저장)
+CREATE TABLE IF NOT EXISTS mail_codes (
+    id                  UUID PRIMARY KEY,
+    email               VARCHAR(320) NOT NULL,
+    purpose             VARCHAR(30) NOT NULL,           -- SIGNUP | PASSWORD_RESET | OAUTH_FIRST_LINK | ACCOUNT_RESTORE | ACCOUNT_RESTART
+    session_binding_id  VARCHAR(128) NOT NULL,
+    code_hmac           VARCHAR(128) NOT NULL,
+    attempt_count       INT NOT NULL DEFAULT 0,
+    resend_available_at TIMESTAMPTZ NOT NULL,
+    expires_at          TIMESTAMPTZ NOT NULL,
+    consumed_at         TIMESTAMPTZ NULL,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_mail_codes_email_session ON mail_codes(email, session_binding_id);
+
+-- F-04, 4.7: 반송 주소 및 코드 100회 연속 실패 24시간 차단
+CREATE TABLE IF NOT EXISTS mail_bounces (
+    email                   VARCHAR(320) PRIMARY KEY,
+    bounced                 BOOLEAN NOT NULL DEFAULT FALSE,
+    consecutive_fail_count  INT NOT NULL DEFAULT 0,
+    blocked_until           TIMESTAMPTZ NULL,
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 4.4: 사용자별 데이터 키 (KMS로 감싼 DEK)
+CREATE TABLE IF NOT EXISTS user_data_keys (
+    user_id         UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    wrapped_dek     BYTEA NOT NULL,
+    kms_key_version VARCHAR(64) NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    rotated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- F-43, F-47: 되묻기 대기 요청 (초기 맥락 보관 및 타 기기 선저장 중복 방지)
+CREATE TABLE IF NOT EXISTS ai_pending_requests (
+    id                  UUID PRIMARY KEY,
+    user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status              VARCHAR(20) NOT NULL,           -- AWAITING_ANSWER | COMPLETED | CANCELLED
+    context_payload_enc TEXT NOT NULL,                  -- 암호화된 초기 문장 · 맥락 · 후보 · 기준 시각/시간대 · 질문/답
+    result_batch_id     UUID NULL,                      -- 먼저 저장된 경우 그 묶음 id(F-47)
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ai_pending_requests_user ON ai_pending_requests(user_id, created_at DESC);
+
+-- F-50: 대화 기록 (워크스페이스 초기 로드 제외 · 최근 것부터 나눠 내려주기 · 휴지통 없이 삭제)
+CREATE TABLE IF NOT EXISTS conversations (
+    id                  UUID PRIMARY KEY,
+    user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status              VARCHAR(20) NOT NULL,           -- SAVED | QUERY_RESULT | AWAITING_ANSWER | PENDING_INBOX
+    record_date         DATE NOT NULL,
+    content_enc         TEXT NOT NULL,                  -- 사용자별 키 암호화(4.4)
+    related_batch_id    UUID NULL,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_created ON conversations(user_id, created_at DESC);
+
+-- =====================================================================
+-- 2. BE 3 소유 선행 테이블 (입력 화면 구성 · 컬렉션 · 휴지통 묶음)
+-- =====================================================================
+
+-- F-08, F-09, 4.7: 입력 화면 구성 (시드 작업으로 넣음)
+CREATE TABLE IF NOT EXISTS input_screen_configs (
+    code                VARCHAR(40) PRIMARY KEY,        -- SCHEDULE | TODO | NOTE | TIMETABLE | SCHEDULE_NOTE | TODO_NOTE | SCHEDULE_TODO
+    display_order       INT NOT NULL,
+    title               VARCHAR(50) NOT NULL,
+    field_groups_json   JSONB NOT NULL,
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- F-15: 휴지통 묶음 (함께 지운 반복 마스터 · 컬렉션과 소속 아이템을 하나로 묶어 복원)
+CREATE TABLE IF NOT EXISTS trash_bundles (
+    id              UUID PRIMARY KEY,
+    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    bundle_type     VARCHAR(30) NOT NULL,               -- SINGLE_ITEM | RECURRENCE_SERIES | COLLECTION_WITH_ITEMS | BULK_ITEMS
+    root_target_id  UUID NOT NULL,
+    deleted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    purge_after     TIMESTAMPTZ NOT NULL,               -- deleted_at + 30일(F-15)
+    restored_at     TIMESTAMPTZ NULL
+);
+CREATE INDEX IF NOT EXISTS idx_trash_bundles_user_deleted ON trash_bundles(user_id, deleted_at DESC);
+
+-- F-40: 컬렉션 (아이템은 컬렉션 하나에만 속함 · 기본 컬렉션 삭제 불가)
+CREATE TABLE IF NOT EXISTS collections (
+    id              UUID PRIMARY KEY,
+    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name_enc        TEXT NOT NULL,                      -- 사용자별 키 암호화(4.4)
+    color           VARCHAR(20) NOT NULL,               -- 스와치 이름(비지 않음, F-40)
+    icon            VARCHAR(50) NOT NULL,
+    is_default      BOOLEAN NOT NULL DEFAULT FALSE,
+    trash_bundle_id UUID NULL REFERENCES trash_bundles(id),
+    deleted_at      TIMESTAMPTZ NULL,
+    purge_after     TIMESTAMPTZ NULL,
+    sync_seq        BIGINT NOT NULL DEFAULT nextval('workspace_sync_seq'),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_collections_user_sync ON collections(user_id, sync_seq);
+
+-- =====================================================================
+-- 3. BE 2 소유 테이블 (아이템 · 연결 · 칸별 버전/되돌리기 · 충돌 · 묶음 쓰기)
+-- =====================================================================
+
+-- F-12, F-13, F-17, F-21, F-26, F-41, F-49: 아이템 본체 (종류 없음 · 속성으로 성격 판정)
+CREATE TABLE IF NOT EXISTS items (
+    id                  UUID PRIMARY KEY,               -- 기기가 정한 id(F-44)
+    user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    collection_id       UUID NOT NULL REFERENCES collections(id),
+
+    -- 공통 속성(F-12)
+    name_enc            TEXT NULL,                      -- 암호화(필수 아님, F-12)
+    tags_enc            TEXT NULL,                      -- 암호화된 JSON 배열(통째로 칸 하나, F-44)
+    color               VARCHAR(20) NULL,               -- RED | ORANGE | AMBER | GREEN | TEAL | BLUE | INDIGO | PINK | GRAY
+
+    -- 일정 속성(F-12, F-26, 4.2)
+    has_schedule        BOOLEAN NOT NULL DEFAULT FALSE,
+    start_at            TIMESTAMPTZ NULL,               -- 시각 일정 시작(UTC)
+    end_at              TIMESTAMPTZ NULL,               -- 시각 일정 끝(UTC, 비면 길이 0 표지)
+    start_date          DATE NULL,                      -- 종일 일정 시작일
+    end_date            DATE NULL,                      -- 종일 일정 종료일(마지막 날의 다음 날, 4.2)
+    is_all_day          BOOLEAN NOT NULL DEFAULT FALSE,
+    location_enc        TEXT NULL,                      -- 암호화(4.4)
+
+    -- 할 일 속성(F-12, F-17)
+    has_todo            BOOLEAN NOT NULL DEFAULT FALSE,
+    todo_status         VARCHAR(20) NULL,               -- TODO | DONE | POSTPONED | CANCELLED
+    completed_at        TIMESTAMPTZ NULL,               -- todo_status와 한 칸으로 동기화(F-17, F-44)
+    due_at              TIMESTAMPTZ NULL,               -- 마감(날짜만 고른 경우 기기 시간대 23:59:59의 UTC)
+    priority            SMALLINT NULL CHECK (priority BETWEEN 1 AND 5),
+    estimated_minutes   INT NULL CHECK (estimated_minutes > 0),
+
+    -- 알람 속성(F-12, F-41)
+    alarms_json         JSONB NULL,                     -- 기준 시각 몇 분 전 정수 배열(예: [0, 10], 통째로 칸 하나)
+
+    -- 노트 속성(F-12, F-21)
+    has_note            BOOLEAN NOT NULL DEFAULT FALSE,
+    body_enc            TEXT NULL,                      -- 암호화된 마크다운 원본(칸 하나)
+
+    -- 반복 · 시간표 유무 표시(세부 행은 BE 3 테이블에 저장)
+    has_recurrence      BOOLEAN NOT NULL DEFAULT FALSE,
+    has_timetable       BOOLEAN NOT NULL DEFAULT FALSE,
+
+    -- 정리 대기 속성(F-49)
+    is_pending_inbox    BOOLEAN NOT NULL DEFAULT FALSE,
+    reference_time      TIMESTAMPTZ NULL,
+    reference_timezone  VARCHAR(64) NULL,
+
+    -- 소프트 삭제 · 동기화 메타(F-15, F-44)
+    trash_bundle_id     UUID NULL REFERENCES trash_bundles(id),
+    deleted_at          TIMESTAMPTZ NULL,
+    purge_after         TIMESTAMPTZ NULL,
+    sync_seq            BIGINT NOT NULL DEFAULT nextval('workspace_sync_seq'),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_items_user_sync ON items(user_id, sync_seq);
+CREATE INDEX IF NOT EXISTS idx_items_user_collection ON items(user_id, collection_id);
+CREATE INDEX IF NOT EXISTS idx_items_purge_after ON items(purge_after) WHERE purge_after IS NOT NULL;
+
+-- F-16, F-22: 아이템 연결 (양쪽 모두 요청자의 것일 때만 허용 · 같은 연결은 하나만)
+CREATE TABLE IF NOT EXISTS item_links (
+    id              UUID PRIMARY KEY,
+    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source_item_id  UUID NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    target_item_id  UUID NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    link_type       VARCHAR(30) NOT NULL,               -- CREATED_FROM | REFERENCE | DERIVED_FROM | POSTPONED_TO | SPLIT_FROM
+    sync_seq        BIGINT NOT NULL DEFAULT nextval('workspace_sync_seq'),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (source_item_id, target_item_id, link_type)
+);
+CREATE INDEX IF NOT EXISTS idx_item_links_user_sync ON item_links(user_id, sync_seq);
+CREATE INDEX IF NOT EXISTS idx_item_links_target ON item_links(target_item_id);
+
+-- F-44, F-48: 칸 단위 마지막 변경 쓰기 이력 (칸 단위 병합 및 F-48 칸별 되돌리기 판정용)
+CREATE TABLE IF NOT EXISTS item_field_versions (
+    id                  UUID PRIMARY KEY,
+    user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item_id             UUID NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    field_key           VARCHAR(100) NOT NULL,          -- NAME | BODY | LOCATION | TAGS | COLOR | COLLECTION | SCHEDULE_TIME | TODO_STATUS | DUE_AT | PRIORITY | ESTIMATED_MINUTES | ALARMS | RECURRENCE_RULE | TIMETABLE_SLOTS | EXCEPTION:YYYY-MM-DD
+    last_write_id       UUID NOT NULL,
+    previous_value_enc  TEXT NULL,                      -- 암호화된 직전 값(F-48 되돌리기 복원용)
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (item_id, field_key)
+);
+
+-- F-45: 풀지 않은 충돌 후보 (사용자가 고를 때까지 모든 기기에 유지)
+CREATE TABLE IF NOT EXISTS conflict_candidates (
+    id                  UUID PRIMARY KEY,
+    user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item_id             UUID NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    field_key           VARCHAR(100) NOT NULL,
+    candidate_value_enc TEXT NOT NULL,                  -- 암호화된 진 쓰기 값 또는 짝 없는 회차 예외 정보(4.4)
+    source_write_id     UUID NOT NULL,
+    resolved_at         TIMESTAMPTZ NULL,
+    sync_seq            BIGINT NOT NULL DEFAULT nextval('workspace_sync_seq'),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_conflict_candidates_user_unresolved ON conflict_candidates(user_id) WHERE resolved_at IS NULL;
+
+-- F-43, F-49: 묶음 쓰기 요청 기록 (묶음 id 재전송 중복 방지 및 저장 상태 조회)
+CREATE TABLE IF NOT EXISTS batch_requests (
+    batch_id                UUID PRIMARY KEY,
+    user_id                 UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    batch_type              VARCHAR(30) NOT NULL,       -- AI_MUTATION | TIMETABLE_CREATE | TODO_POSTPONE | ICS_IMPORT | BULK_DELETE
+    status                  VARCHAR(20) NOT NULL,       -- COMPLETED | FAILED | UNDONE
+    response_snapshot_enc   TEXT NOT NULL,              -- 재전송 시 그대로 돌려줄 암호화 응답
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_batch_requests_user ON batch_requests(user_id, created_at DESC);
+
+-- F-41: 시스템 알림 (지워진 대상에 닿은 쓰기 · 서버 안내)
+CREATE TABLE IF NOT EXISTS system_notifications (
+    id                  UUID PRIMARY KEY,
+    user_id             UUID NULL REFERENCES users(id) ON DELETE CASCADE,
+    notification_type   VARCHAR(40) NOT NULL,           -- SERVER_NOTICE | WRITE_ON_DELETED_ITEM
+    payload_enc         TEXT NOT NULL,
+    sync_seq            BIGINT NOT NULL DEFAULT nextval('workspace_sync_seq'),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 4.4: 물리 삭제 로그 (DB 백업 35일 복원 뒤 삭제를 다시 적용하기 위한 무문장 기록)
+CREATE TABLE IF NOT EXISTS deletion_audit_logs (
+    id          UUID PRIMARY KEY,
+    target_type VARCHAR(30) NOT NULL,                   -- USER | ITEM | COLLECTION | CONVERSATION
+    target_id   UUID NOT NULL,
+    purged_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_deletion_audit_logs_purged_at ON deletion_audit_logs(purged_at);
+
+-- =====================================================================
+-- 4. BE 3 소유 테이블 (설정 · 보기 상태 · 고정 · 반복 · 시간표 · ICS)
+-- =====================================================================
+
+-- F-46: 사용자 설정 · 지침(암호화) · 동의 상태
+CREATE TABLE IF NOT EXISTS user_settings (
+    user_id                     UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    theme                       VARCHAR(20) NOT NULL DEFAULT 'LIGHT',
+    week_start_day              VARCHAR(10) NOT NULL DEFAULT 'MONDAY',
+    day_start_hour              SMALLINT NOT NULL DEFAULT 7 CHECK (day_start_hour BETWEEN 0 AND 12),
+    density_json                JSONB NOT NULL DEFAULT '{"month":"COMPACT","default":"STANDARD"}',
+    shortcuts_json              JSONB NULL,
+    ai_guideline_enc            TEXT NULL,              -- 사용자별 키 암호화(F-46, 4.4)
+    ai_consent                  BOOLEAN NOT NULL DEFAULT FALSE,
+    ocr_server_consent          BOOLEAN NOT NULL DEFAULT FALSE,
+    visible_collection_ids_json JSONB NOT NULL DEFAULT '[]',
+    sync_seq                    BIGINT NOT NULL DEFAULT nextval('workspace_sync_seq'),
+    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- F-26, F-29, F-32, F-37, F-46, F-51, F-52: 모듈별 보기 상태 (정렬 · 그룹 · 거르기 · 표시 요일)
+CREATE TABLE IF NOT EXISTS user_view_states (
+    id          UUID PRIMARY KEY,
+    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    view_key    VARCHAR(50) NOT NULL,                   -- CALENDAR_LAST_VIEW | WEB_WEEK_MODE | DAY_BOARD | TIMETABLE | TODO_MODULE | NOTE_MODULE | ARCHIVE_MODULE
+    state_json  JSONB NOT NULL,
+    sync_seq    BIGINT NOT NULL DEFAULT nextval('workspace_sync_seq'),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, view_key)
+);
+
+-- F-07, F-26, F-46: 고정한 아이템 (아이템의 칸이 아니라 사용자의 보기 상태)
+CREATE TABLE IF NOT EXISTS user_pinned_items (
+    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item_id     UUID NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    pinned_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    sync_seq    BIGINT NOT NULL DEFAULT nextval('workspace_sync_seq'),
+    PRIMARY KEY (user_id, item_id)
+);
+
+-- F-23, F-24: 반복 마스터 규칙 (규칙이 정본이며 통째로 칸 하나)
+CREATE TABLE IF NOT EXISTS item_recurrences (
+    item_id         UUID PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    rrule           VARCHAR(500) NOT NULL,              -- iCalendar RRULE(n일마다 · 매주)
+    rdate_json      JSONB NOT NULL DEFAULT '[]',        -- 더하기(RDATE) 날짜 배열
+    exdate_json     JSONB NOT NULL DEFAULT '[]',        -- 지우기(EXDATE) 날짜 배열
+    series_root_id  UUID NOT NULL,                      -- 나뉜 마스터 사슬 묶음 id(F-16, F-24)
+    effective_from  DATE NULL,                          -- 적용 시작일(F-24, F-33)
+    until_date      DATE NULL,                          -- 나뉜 앞 마스터의 종료일 또는 시간표 기간 종료일
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_item_recurrences_series ON item_recurrences(user_id, series_root_id);
+
+-- F-23: 반복 회차 예외 (RECURRENCE-ID · EXDATE, 같은 마스터와 날짜에는 하나만 남음)
+CREATE TABLE IF NOT EXISTS item_exceptions (
+    id                      UUID PRIMARY KEY,
+    user_id                 UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    master_item_id          UUID NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    recurrence_date         DATE NOT NULL,              -- RECURRENCE-ID 기준 날짜(날짜 하나가 칸 하나, F-44)
+    is_deleted_occurrence   BOOLEAN NOT NULL DEFAULT FALSE, -- EXDATE 여부(F-23)
+    exception_item_id       UUID NULL REFERENCES items(id) ON DELETE SET NULL, -- 손댄 회차 아이템(derived_from)
+    modified_fields_json    JSONB NOT NULL DEFAULT '[]',-- 손댄 칸 이름 목록(나머지는 마스터를 따름, F-23)
+    sync_seq                BIGINT NOT NULL DEFAULT nextval('workspace_sync_seq'),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (master_item_id, recurrence_date)
+);
+CREATE INDEX IF NOT EXISTS idx_item_exceptions_user_sync ON item_exceptions(user_id, sync_seq);
+
+-- F-30, F-31, F-33: 시간표 아이템의 시간대 목록과 기간 (같은 컬렉션 내 기간·시간대 겹침 검사)
+CREATE TABLE IF NOT EXISTS timetable_slots (
+    id              UUID PRIMARY KEY,
+    item_id         UUID NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    collection_id   UUID NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    day_of_week     SMALLINT NOT NULL CHECK (day_of_week BETWEEN 1 AND 7), -- 1(월) ~ 7(일)
+    start_time      TIME NOT NULL,                      -- 날짜·시간대 없는 시:분(4.2)
+    end_time        TIME NOT NULL CHECK (end_time > start_time),
+    period_start    DATE NOT NULL,                      -- 비우면 만든 날(F-30)
+    period_end      DATE NULL,                          -- 비우면 끝 없음(F-30)
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_timetable_slots_collection ON timetable_slots(user_id, collection_id, day_of_week);
+
+-- F-42: ICS 가져오기 기록 (UID 보관 및 재가져오기 시 사용자 수정 칸 보호 비교용)
+CREATE TABLE IF NOT EXISTS ics_import_records (
+    id                          UUID PRIMARY KEY,
+    user_id                     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    external_uid                VARCHAR(500) NOT NULL,
+    item_id                     UUID NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    last_imported_snapshot_enc  TEXT NOT NULL,          -- 암호화된 마지막 가져온 값(4.4)
+    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, external_uid)
+);
+```
+
+## 2.4 API 명세 v1.0 맞춤 보정 (`src/main/resources/db/migration/V6__align_with_api_v1.sql`)
+
+2026-11-10 「API 명세 합의 v1.0」이 약속한 동작 가운데 몇 가지는 2.3 스키마로 구현할 수 없어서, 공통 보정을 V6 하나로 더한다. 2.3(실제 파일은 V5)은 체크섬을 지키려고 고치지 않는다. 엔티티와 4장의 port도 같은 변경에서 맞췄다.
+
+| 영역                      | 왜 바꾸나                                                                                                                                                                         | 바뀌는 것                                                                                                                                                                                                                                                                                                          |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 쓰기 기록 · 동기화        | `writeId` 재전송(alreadyProcessed · IDEMPOTENCY_KEY_REUSED)을 판정할 기록이 묶음에만 있고, 지운 행을 다른 기기에 알릴 흔적이 없다. 묶음 키가 전역이라 다른 사용자의 ID와 부딪친다 | 신규 `write_requests` · `sync_tombstones` · `batch_results`, `batch_requests` 키를 (user_id, batch_id)로, `request_hash` · `ai_request_id`(완료된 것 UNIQUE) · `conversation_id` · `undo_blocked` 추가, `sync_seq`가 없던 `trash_bundles` · `ics_import_records` · `input_screen_configs` · `conversations`에 추가 |
+| 칸 버전 · 되돌리기 · 충돌 | 직전 값을 칸마다 하나만 두어 연속 되돌리기(F-48)가 안 되고, 칸 키가 API(START_AT · END_AT 등)와 다르다                                                                            | `item_field_versions`는 지금 버전만(키 (item_id, field_key)), 쓰기마다의 직전 값은 신규 `item_field_writes`, 충돌 후보에 `kind` · 회차 열                                                                                                                                                                          |
+| 반복 · 시간표             | 예외 키가 (마스터, 날짜)라 같은 날 두 번째 시간대의 회차 예외를 저장할 수 없고, 시간표 기간 · 소속이 시간대 행마다 중복돼 있다                                                    | `item_exceptions`에 `slot_id`(UNIQUE 마스터 + 날짜 + slot_id), 신규 `item_timetables`(기간), `timetable_slots`에서 `collection_id` · 기간 열 삭제                                                                                                                                                                  |
+| AI · 대화                 | 같은 AI 요청의 중복 저장을 막지 못하고, 동시 수정 검사용 버전 열이 없다                                                                                                           | `ai_pending_requests`에 `revision` · `conversation_id`(모든 해석 요청을 한 줄로), `conversations`에 `request_id` · `revision`                                                                                                                                                                                      |
+
+동기화 규칙(모든 담당이 지킨다)은 SQL 머리 주석에 적었다: 사용자별 advisory lock, UPDATE마다 `sync_seq` 올리기, 행을 지우면 같은 트랜잭션에서 `sync_tombstones`, 반복 · 시간표 행이 바뀌면 그 아이템의 `sync_seq` 올리기. 이 규칙은 2.7(V9 · V10)에서 바뀌었다: 잠금은 워크스페이스 단위이고, 번호 올리기와 tombstone은 트리거가 한다.
+
+쓰기 기록은 API에 따라 두 곳으로 나눈다. `batchId`를 받는 API(`POST /batches` · `POST /items/trash` · `POST /ics/imports`)는 `batch_requests`에, `writeId`를 받는 나머지 쓰기 API는 `write_requests`에 남긴다. 기준은 바꾼 아이템 수가 아니라 API다. 아이템 하나를 지워도 `batch_requests`이고, 여러 아이템을 옮겨도 아이템마다 단건 쓰기라 `write_requests`다. 둘을 나눈 이유는 양과 수명이다. 단건 쓰기는 잦고 재전송 기간이 지나면 지우지만, 묶음은 드물고 되돌리기와 대화 기록이 참조해 오래 남는다.
+
+칸 버전(`item_field_versions.last_write_id` = API `FieldVersionDto.lastWriteId`)에는 칸을 바꾼 쓰기의 ID를 남긴다. 단건 쓰기는 `writeId`, 묶음 안의 패치 · 지우기 · 미루기는 그 연산의 `operationId`이고 `batchId`는 남기지 않는다. `item_field_writes.write_id`와 같은 값이다. iOS는 오프라인에서 같은 칸을 이어 고칠 때 앞 쓰기의 ID를 뒤 쓰기의 `baseFieldVersions`로 싣는다. 묶음의 `batchId`를 남기면 한 묶음 안의 여러 연산이 같은 칸 버전을 갖게 되고, 기기는 응답을 받기 전에는 그 값을 기준으로 실을 수 없다. `operationId`는 기기가 미리 정하고 묶음 안에서 하나뿐이라 이 두 문제가 없다(기능 명세 v0.0.6 F-44 · F-45).
+
+이번 보정에 넣지 않고 각 담당 대역으로 뒤에 올릴 것: `users.status`에서 가입 대기 값 빼기, `user_devices.end_reason`, `items`의 확장 속성 · 정리 대기 요청 열, `system_notifications` 읽음 처리, `user_settings` 동의 시각 · 고지문 버전, `collections` 기본 컬렉션 하나 제약, 정리 작업용 인덱스.
+
+```sql
+-- 공통 기반 보정: 「API 명세 합의 v1.0」(2026-11-10)이 기대는 스키마로 맞춘다.
+-- V5(공통-파일.md 2026-11-01 스키마)는 체크섬을 지키려고 고치지 않고, 바뀐 것만 여기서 더한다.
+-- 이유와 범위는 공통-파일.md 2.4에 있다.
+-- 아직 어떤 기능도 이 테이블들에 쓰지 않으므로, NOT NULL 열은 기본값 없이 더한다.
+-- 행이 남아 있는 DB라면 이 마이그레이션이 실패하므로 그 DB를 먼저 확인한다.
+
+-- =====================================================================
+-- 0. 동기화 규칙 (모든 담당이 지킨다)
+-- =====================================================================
+-- 1) 한 사용자의 데이터를 바꾸는 모든 트랜잭션(API · 휴지통 정리 · 탈퇴 정리 · 시스템 안내 등)은
+--    맨 앞에서 pg_advisory_xact_lock(hashtext(user_id::text))를 잡는다.
+--    같은 사용자의 커밋이 직렬화되어 sync_seq 순서가 커밋 순서와 같아진다.
+-- 2) sync_seq 기본값은 INSERT 때만 돈다. UPDATE마다 sync_seq = nextval('workspace_sync_seq')를 직접 넣는다.
+-- 3) 행을 지우는 모든 경우(연결 해제 · 고정 해제 · 물리 삭제 · 대화 삭제)는 같은 트랜잭션에서
+--    sync_tombstones에 한 줄을 넣는다. CASCADE로 함께 지워지는 행도 마찬가지다.
+-- 4) item_recurrences · item_timetables · timetable_slots는 ItemDto의 일부라 바뀌면 그 items.sync_seq를 올린다.
+
+-- =====================================================================
+-- 1. 쓰기 기록 · 동기화 (BE 2)
+-- =====================================================================
+
+-- 단건 쓰기 멱등 기록. writeId를 쓰는 모든 API(아이템 · 링크 · 컬렉션 · 휴지통 복구 · 충돌 해결 ·
+-- 되돌리기 · 설정 · 보기 상태 · 고정 · 대화 기록)가 같은 트랜잭션에서 한 줄을 넣는다.
+-- 같은 (user_id, write_id)와 같은 request_hash면 저장한 응답을 alreadyProcessed=true로 돌려주고,
+-- 해시가 다르면 409 IDEMPOTENCY_KEY_REUSED로 거절한다.
+CREATE TABLE IF NOT EXISTS write_requests (
+    user_id                 UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    write_id                UUID NOT NULL,
+    endpoint                VARCHAR(60) NOT NULL,       -- 예: ITEM_PATCH | LINK_DELETE | UNDO
+    request_hash            VARCHAR(64) NOT NULL,       -- 정규화한 요청 본문의 SHA-256
+    response_snapshot_enc   TEXT NOT NULL,              -- 재전송 때 돌려줄 암호화 응답
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    purge_after             TIMESTAMPTZ NOT NULL,       -- iOS 미전송 쓰기 보관(30일)보다 길게 둔다
+    PRIMARY KEY (user_id, write_id)
+);
+CREATE INDEX IF NOT EXISTS idx_write_requests_purge ON write_requests(purge_after);
+
+-- 증분 동기화의 삭제 흔적. /workspace/changes가 sync_seq로 다른 변경과 함께 읽는다.
+-- 보관은 35일이다(SYNC_CURSOR_EXPIRED 기준과 같다).
+CREATE TABLE IF NOT EXISTS sync_tombstones (
+    sync_seq        BIGINT PRIMARY KEY DEFAULT nextval('workspace_sync_seq'),
+    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    resource_type   VARCHAR(30) NOT NULL,               -- WorkspaceResourceType(LINK | PIN | ITEM | CONVERSATION 등)
+    resource_id     VARCHAR(100) NOT NULL,              -- UUID 또는 복합 키를 문자열로
+    deleted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_sync_tombstones_user_sync ON sync_tombstones(user_id, sync_seq);
+CREATE INDEX IF NOT EXISTS idx_sync_tombstones_deleted ON sync_tombstones(deleted_at);
+
+-- 묶음 쓰기 기록: 사용자별 키, 같은 ID 다른 내용 판정, 같은 AI 요청 1회 저장, 대화 삭제 뒤 되돌리기 막기
+ALTER TABLE batch_requests DROP CONSTRAINT batch_requests_pkey;
+ALTER TABLE batch_requests ADD PRIMARY KEY (user_id, batch_id);
+ALTER TABLE batch_requests ADD COLUMN request_hash VARCHAR(64) NOT NULL;
+ALTER TABLE batch_requests ADD COLUMN ai_request_id UUID NULL;
+ALTER TABLE batch_requests ADD COLUMN conversation_id UUID NULL;
+ALTER TABLE batch_requests ADD COLUMN undo_blocked BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE batch_requests ALTER COLUMN response_snapshot_enc DROP NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_batch_requests_ai ON batch_requests(user_id, ai_request_id)
+    WHERE ai_request_id IS NOT NULL AND status = 'COMPLETED';
+-- status는 COMPLETED | FAILED로 쓴다. 되돌림은 결과 단위로 batch_results에 남긴다.
+-- response_snapshot_enc는 아이템을 물리 삭제할 때 비운다(명세 4.4).
+
+-- 묶음 결과 하나하나의 되돌리기 상태
+CREATE TABLE IF NOT EXISTS batch_results (
+    user_id         UUID NOT NULL,
+    batch_id        UUID NOT NULL,
+    result_id       UUID NOT NULL,
+    operation_id    UUID NOT NULL,
+    item_id         UUID NOT NULL,
+    undone_at       TIMESTAMPTZ NULL,
+    PRIMARY KEY (user_id, batch_id, result_id),
+    FOREIGN KEY (user_id, batch_id) REFERENCES batch_requests(user_id, batch_id) ON DELETE CASCADE
+);
+
+-- sync_seq가 없던 동기화 자원
+ALTER TABLE trash_bundles ADD COLUMN sync_seq BIGINT NOT NULL DEFAULT nextval('workspace_sync_seq');
+CREATE INDEX IF NOT EXISTS idx_trash_bundles_user_sync ON trash_bundles(user_id, sync_seq);
+ALTER TABLE ics_import_records ADD COLUMN sync_seq BIGINT NOT NULL DEFAULT nextval('workspace_sync_seq');
+CREATE INDEX IF NOT EXISTS idx_ics_import_records_user_sync ON ics_import_records(user_id, sync_seq);
+ALTER TABLE input_screen_configs ADD COLUMN sync_seq BIGINT NOT NULL DEFAULT nextval('workspace_sync_seq');
+
+-- =====================================================================
+-- 2. 칸 버전 · 되돌리기 · 충돌 (BE 2)
+-- =====================================================================
+
+-- 칸별 "지금" 버전만 둔다. 직전 값은 쓰기마다 item_field_writes에 남긴다.
+-- field_key는 API 칸 키를 쓴다: NAME | BODY | LOCATION | TAGS | COLOR | COLLECTION | START_AT | END_AT |
+-- START_DATE | END_DATE | IS_ALL_DAY | TODO_STATUS | DUE_AT | PRIORITY | ESTIMATED_MINUTES | ALARMS |
+-- RECURRENCE_RULE | TIMETABLE_SLOTS | EXCEPTION:YYYY-MM-DD | EXCEPTION:YYYY-MM-DD:<slotId>
+ALTER TABLE item_field_versions DROP CONSTRAINT item_field_versions_item_id_field_key_key;
+ALTER TABLE item_field_versions DROP CONSTRAINT item_field_versions_pkey;
+ALTER TABLE item_field_versions DROP COLUMN id;
+ALTER TABLE item_field_versions DROP COLUMN previous_value_enc;
+ALTER TABLE item_field_versions ALTER COLUMN last_write_id DROP NOT NULL;
+ALTER TABLE item_field_versions ADD PRIMARY KEY (item_id, field_key);
+
+-- 칸 쓰기 이력. 쓰기 하나가 바꾼 칸마다 한 줄.
+-- 되돌리기는 대상 쓰기가 그 칸의 마지막 "되돌리지 않은" 쓰기일 때만 previous_value_enc로 돌리고,
+-- undone_at을 찍은 뒤 item_field_versions.last_write_id를 previous_write_id로 되돌린다.
+-- 그러면 앞 요청이 다시 마지막 쓰기가 되어 이어서 되돌릴 수 있다(F-48).
+CREATE TABLE IF NOT EXISTS item_field_writes (
+    id                  UUID PRIMARY KEY,
+    user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item_id             UUID NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    field_key           VARCHAR(100) NOT NULL,
+    write_id            UUID NOT NULL,                  -- 단건 writeId 또는 묶음 안 operationId
+    batch_id            UUID NULL,
+    result_id           UUID NULL,                      -- 묶음 결과 하나(되돌리기 단위)
+    previous_write_id   UUID NULL,                      -- 이 쓰기 직전의 last_write_id
+    previous_value_enc  TEXT NULL,                      -- 암호화한 직전 값
+    had_previous        BOOLEAN NOT NULL,               -- 회차 예외: 요청 전에 예외 값이 있었는지
+    undone_at           TIMESTAMPTZ NULL,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (item_id, field_key, write_id)
+);
+CREATE INDEX IF NOT EXISTS idx_item_field_writes_write ON item_field_writes(user_id, write_id);
+CREATE INDEX IF NOT EXISTS idx_item_field_writes_result ON item_field_writes(user_id, batch_id, result_id);
+
+-- 충돌 후보: 칸 값 충돌과 짝 없는 회차 예외를 가른다
+ALTER TABLE conflict_candidates ADD COLUMN kind VARCHAR(30) NOT NULL;   -- FIELD_VALUE | ORPHANED_OCCURRENCE
+ALTER TABLE conflict_candidates ADD COLUMN occurrence_date DATE NULL;
+ALTER TABLE conflict_candidates ADD COLUMN occurrence_slot_id UUID NULL;
+CREATE INDEX IF NOT EXISTS idx_conflict_candidates_item_field ON conflict_candidates(item_id, field_key);
+CREATE INDEX IF NOT EXISTS idx_conflict_candidates_user_sync ON conflict_candidates(user_id, sync_seq);
+
+-- =====================================================================
+-- 3. 반복 · 시간표 (BE 3)
+-- =====================================================================
+
+-- 회차 예외 키에 시간대를 더한다. 일반 반복은 slot_id가 비고, 시간표 회차는 시간대까지 가린다.
+ALTER TABLE item_exceptions ADD COLUMN slot_id UUID NULL;
+ALTER TABLE item_exceptions DROP CONSTRAINT item_exceptions_master_item_id_recurrence_date_key;
+ALTER TABLE item_exceptions ADD CONSTRAINT uq_item_exceptions_occurrence
+    UNIQUE NULLS NOT DISTINCT (master_item_id, recurrence_date, slot_id);
+
+-- 시간표 아이템의 기간은 아이템마다 하나다(F-30). 시간대 행마다 두던 기간을 여기로 모은다.
+CREATE TABLE IF NOT EXISTS item_timetables (
+    item_id         UUID PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    period_start    DATE NOT NULL,                      -- 비우면 만든 날(F-30)
+    period_end      DATE NULL,                          -- 비우면 끝 없음(F-30)
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (period_end IS NULL OR period_end >= period_start)
+);
+INSERT INTO item_timetables (item_id, user_id, period_start, period_end)
+SELECT DISTINCT ON (item_id) item_id, user_id, period_start, period_end
+FROM timetable_slots
+ORDER BY item_id, period_start;
+
+-- 시간대 행에는 시간대만 둔다. 소속은 items.collection_id, 기간은 item_timetables가 갖는다.
+-- 겹침 검사는 items.collection_id와 item_timetables 기간을 조인해 사용자 잠금 안에서 한다.
+DROP INDEX IF EXISTS idx_timetable_slots_collection;
+ALTER TABLE timetable_slots DROP CONSTRAINT timetable_slots_item_id_fkey;
+ALTER TABLE timetable_slots ADD CONSTRAINT fk_timetable_slots_item_timetable
+    FOREIGN KEY (item_id) REFERENCES item_timetables(item_id) ON DELETE CASCADE;
+ALTER TABLE timetable_slots DROP COLUMN collection_id;
+ALTER TABLE timetable_slots DROP COLUMN period_start;
+ALTER TABLE timetable_slots DROP COLUMN period_end;
+CREATE INDEX IF NOT EXISTS idx_timetable_slots_item ON timetable_slots(item_id);
+CREATE INDEX IF NOT EXISTS idx_timetable_slots_user_day ON timetable_slots(user_id, day_of_week);
+-- timetable_slots.id는 API의 slotId다. 시간표 전체 수정(ALL)에서 유지되는 시간대는 같은 id를 쓴다.
+-- item_recurrences.until_date는 반복의 종료일만 뜻한다. 시간표 기간 종료일은 item_timetables.period_end다.
+
+-- =====================================================================
+-- 4. AI · 대화 (BE 1)
+-- =====================================================================
+
+-- 해석 요청은 되묻기 대기만이 아니라 모든 요청을 한 줄로 둔다.
+-- status: READY | AWAITING_ANSWER | COMPLETED | CANCELLED
+ALTER TABLE ai_pending_requests ADD COLUMN revision VARCHAR(64) NOT NULL;   -- expectedAiRevision · AI_REQUEST_CHANGED 검사
+ALTER TABLE ai_pending_requests ADD COLUMN conversation_id UUID NULL;
+
+ALTER TABLE conversations ADD COLUMN request_id UUID NULL;                  -- 이어 답할 해석 요청
+ALTER TABLE conversations ADD COLUMN revision VARCHAR(64) NOT NULL;         -- expectedRevision 검사
+ALTER TABLE conversations ADD COLUMN sync_seq BIGINT NOT NULL DEFAULT nextval('workspace_sync_seq');
+CREATE INDEX IF NOT EXISTS idx_conversations_user_sync ON conversations(user_id, sync_seq);
+```
+
+## 2.5 아이템 시간대와 날짜만 고른 마감 (`src/main/resources/db/migration/V7__item_time_zone_and_due_date.sql`)
+
+기능 명세 v0.0.6(2026-11-12)이 아이템에 표준 시간대를 주고, 날짜만 고른 마감을 날짜로 저장하게 바꿨다(F-12 · F-17 · F-23 · F-26 · F-46 · 4.2). 시각 값이 UTC 순간뿐이면 어느 시간대의 벽시계로 정한 값인지 남지 않아서, 시간대가 다른 기기와 서버가 같은 반복 회차를 다른 날짜로 부른다. 회차의 정체성(`recurrenceDate`)과 예외 칸 키(`EXCEPTION:<날짜>`)가 날짜라서 예외가 짝을 잃는다.
+
+| 바뀌는 것                                  | 뜻                                                                                                                                                                 |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `items.time_zone` (IANA, null 허용)        | 아이템의 표준 시간대. 새 아이템은 계정의 기본 시간대를 받는다. null은 떠 있는 시각(보는 기기의 시간대로 읽는다)이고 MVP의 앱은 늘 값을 넣는다. 칸 키는 `TIME_ZONE` |
+| `items.due_date` (DATE)                    | 날짜만 고른 마감. 시각을 고른 마감은 `due_at`이고 둘 가운데 하나만 있다(CHECK). 두 열은 칸 키 `DUE_AT` 하나로 버전 · 충돌을 다룬다                                 |
+| `user_settings.time_zone` (IANA, NOT NULL) | 계정의 기본 시간대. 처음 값은 가입한 기기의 시간대이고, `WorkspaceLifecyclePort.initializeWorkspaceForNewUser(userId, timeZone)`로 받는다                          |
+
+서버가 날짜를 내는 계산(반복 나누기 · 예외와 지운 회차 옮기기 · 적용 시작일 뒤 회차 판정 · 짝 없는 예외 판정 · 날짜 없는 아이템의 만든 날)은 마스터 아이템의 시간대로 한다. 공통 도우미는 `common.domain.ItemTimeZones`, DTO 검증 애너테이션은 `common.validation.@IanaTimeZone`이다. 종일 값 · `due_date` · 시간표 시간대는 시간대 없는 날짜와 시각이라 그대로다. 아이템마다 시간대를 바꾸는 화면은 MVP 밖이지만, 칸은 PATCH로 바꿀 수 있게 열어 둔다.
+
+```sql
+-- 공통 기반 보정: 기능 명세 v0.0.6(2026-11-12)의 아이템 시간대와 날짜만 고른 마감.
+-- 근거: F-12 · F-17 · F-23 · F-26 · F-46 · 4.2. 이유와 범위는 공통-파일.md 2.5에 있다.
+
+-- 아이템의 표준 시간대(IANA, 예: Asia/Seoul). 비면 떠 있는 시각이다(보는 기기의 시간대로 읽는다).
+-- 새 아이템은 계정의 기본 시간대(user_settings.time_zone)를 받는다. MVP의 앱은 늘 값을 넣는다.
+-- 시각 값(start_at · end_at · due_at)의 벽시계, 반복 회차 날짜(recurrence_date · rdate · exdate ·
+-- until_date · effective_from), 날짜 없는 아이템의 만든 날을 이 시간대로 정한다.
+-- 종일 값(start_date · end_date) · due_date · 시간표 시간대(timetable_slots)는 시간대 없이 날짜와 시각이다.
+-- 칸 키는 TIME_ZONE이다.
+ALTER TABLE items ADD COLUMN time_zone VARCHAR(64) NULL;
+
+-- 날짜만 고른 마감. 시각을 고른 마감은 due_at이고 둘 가운데 하나만 있다.
+-- 두 열은 칸 키 DUE_AT 하나로 버전 · 충돌을 다룬다(한 기기가 날짜, 다른 기기가 시각을 골라도 둘이 함께 서지 않게).
+ALTER TABLE items ADD COLUMN due_date DATE NULL;
+ALTER TABLE items ADD CONSTRAINT ck_items_due_at_or_due_date CHECK (due_at IS NULL OR due_date IS NULL);
+
+-- 계정의 기본 시간대. 처음 값은 가입한 기기의 시간대이고(WorkspaceLifecyclePort), 설정에서 바꾼다.
+-- 바꾸면 그 뒤에 만든 아이템만 새 값을 받는다. 화면은 이 값과 상관없이 보는 기기의 시간대로 보인다.
+-- 이미 있는 행은 Asia/Seoul로 채우고 기본값을 지운다. 새 행은 가입 처리가 값을 넣어야 한다.
+ALTER TABLE user_settings ADD COLUMN time_zone VARCHAR(64) NOT NULL DEFAULT 'Asia/Seoul';
+ALTER TABLE user_settings ALTER COLUMN time_zone DROP DEFAULT;
+```
+
+---
+
+## 2.6 종류별 기본 알림 (`src/main/resources/db/migration/V8__user_settings_default_alarms.sql`)
+
+기능 명세 v0.0.6(2026-11-12)이 설정에 종류별 기본 알림을 더했다(F-41 · F-46). 아이템을 만들 때 알람을 따로 정하지 않았으면 기기가 그 종류의 기본값을 아이템의 알람 칸에 채운다. 기본값을 바꿔도 이미 만든 아이템은 바뀌지 않고, 일정이면서 할 일이면 일정의 값을 쓴다. ICS로 가져온 아이템은 파일의 알림을 따른다.
+
+| 바뀌는 것                                             | 뜻                                                                                                                                                                                         |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `user_settings.default_alarms_json` (JSONB, NOT NULL) | 키 넷(`timedEvent` · `allDayEvent` · `timedTodo` · `dateOnlyTodo`), 값은 아이템 알람 칸과 같은 "기준 시각 몇 분 전" 정수 목록. 종일 · 날짜만 고른 할 일은 그날의 하루 시작 시각이 기준이다 |
+| 처음 값                                               | 열 기본값으로 가입 때 들어간다: 시각 일정 10분 전, 나머지는 기준 시각 정시. 엔티티의 `UserSetting.INITIAL_DEFAULT_ALARMS`와 같다                                                           |
+| 검증                                                  | 네 키가 다 있고 다른 키가 없으며, 값은 0 이상의 정수 목록이어야 한다(CHECK)                                                                                                                |
+
+서버는 저장만 하고 아이템에 채우는 일은 기기가 한다. API는 `SettingsDto` · `SettingsPatchDto`의 `defaultAlarms` 한 칸(네 목록을 담은 객체, 포함하면 통째로 교체)이다.
+
+```sql
+-- 공통 기반 보정: 기능 명세 v0.0.6(2026-11-12)의 종류별 기본 알림.
+-- 근거: F-41 · F-46. 이유와 범위는 공통-파일.md 2.6에 있다.
+
+-- 종류별 기본 알림. 키는 넷이고 값은 items.alarms_json과 같은 뜻의 목록이다(기준 시각 몇 분 전, 0은 정시).
+--   timedEvent   시각 일정             기준 시각 = 시작
+--   allDayEvent  종일 일정             기준 시각 = 그날의 하루 시작 시각(day_start_hour)
+--   timedTodo    시각을 고른 할 일      기준 시각 = 마감
+--   dateOnlyTodo 날짜만 고른 할 일      기준 시각 = 그날의 하루 시작 시각
+-- 서버는 저장만 한다. 아이템을 만들 때 알람을 따로 정하지 않았으면 기기가 이 값을 아이템의 알람 칸에 채운다.
+-- 일정이면서 할 일이면 일정의 값을 쓴다. 기본값을 바꿔도 이미 만든 아이템은 바뀌지 않는다.
+-- 처음 값(가입 때)은 서버가 넣는다: 시각 일정 10분 전, 나머지는 기준 시각 정시.
+ALTER TABLE user_settings ADD COLUMN default_alarms_json JSONB NOT NULL DEFAULT '{"timedEvent":[10],"allDayEvent":[0],"timedTodo":[0],"dateOnlyTodo":[0]}';
+-- 키가 빠지면 jsonb_typeof가 NULL이 되어 CHECK를 통과하므로 ?&로 네 키가 다 있는지 먼저 본다.
+ALTER TABLE user_settings ADD CONSTRAINT ck_user_settings_default_alarms CHECK (
+    default_alarms_json ?& ARRAY['timedEvent', 'allDayEvent', 'timedTodo', 'dateOnlyTodo']
+    AND jsonb_typeof(default_alarms_json -> 'timedEvent') = 'array'
+    AND jsonb_typeof(default_alarms_json -> 'allDayEvent') = 'array'
+    AND jsonb_typeof(default_alarms_json -> 'timedTodo') = 'array'
+    AND jsonb_typeof(default_alarms_json -> 'dateOnlyTodo') = 'array'
+    AND default_alarms_json - ARRAY['timedEvent', 'allDayEvent', 'timedTodo', 'dateOnlyTodo'] = '{}'::jsonb
+    AND NOT jsonb_path_exists(default_alarms_json, '$.*[*] ? (@.type() != "number" || @ < 0 || @ != @.floor())')
+);
+```
+
+## 2.7 공통 기반 고정 보정 (`V9__workspaces_and_freeze.sql` · `V10__sync_triggers.sql`)
+
+2026-11-12 공통 기반을 고정하기 전에 정한 것을 담는다. V9는 워크스페이스와 구조, V10은 동기화 트리거다. V1~V8은 체크섬을 지키려고 고치지 않았다. 두 파일 모두 행이 있는 DB에서 돈다(새 NOT NULL 열은 NULL로 더하고 채운 뒤 NOT NULL로 바꾼다).
+
+**워크스페이스**: 한 계정이 여럿 가질 수 있게 둔다. MVP는 계정마다 하나(`UNIQUE(owner_user_id)`)이고 가입할 때 `WorkspaceLifecyclePort.initializeWorkspaceForNewUser`가 만든다. 화면과 API 경로는 MVP에서 바꾸지 않는다. 동기화 잠금은 `pg_advisory_xact_lock(hashtext(workspace_id::text))`, 커서와 인덱스는 `(workspace_id, sync_seq)`다.
+
+| 갈래                              | 표                                                                                                                                                                                                                                                                                                    | 이유                                                                                                         |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| 워크스페이스(`workspace_id` 더함) | `collections` · `items` · `item_links` · `item_recurrences` · `item_exceptions` · `item_timetables` · `timetable_slots` · `item_field_versions` · `item_field_writes` · `conflict_candidates` · `trash_bundles` · `user_pinned_items` · `ics_import_records` · `user_view_states` · `sync_tombstones` | 아이템 · 컬렉션과 그에 딸린 데이터, 그 보기 상태, 동기화 흔적                                                |
+| 계정(`user_id` 그대로)            | `users` · `user_oauth_accounts` · `user_devices` · `not_me_tokens` · `user_data_keys` · `user_settings` · `conversations` · `ai_pending_requests` · `system_notifications`                                                                                                                            | 계정 · 인증 · 기기 · 키 · 설정 · AI 대화 · 알림                                                              |
+| 계정(애매해서 가른 것)            | `write_requests` · `batch_requests` · `batch_results`                                                                                                                                                                                                                                                 | 멱등 키가 `(user_id, …)`이고, 설정 · 대화처럼 워크스페이스 밖의 쓰기도 기록한다. 묶음은 대화 기록과 이어진다 |
+| 사용자 없음                       | `mail_codes` · `mail_bounces` · `deletion_audit_logs` · `input_screen_configs`                                                                                                                                                                                                                        | 가입 전 · 운영 기록 · 서버 시드                                                                              |
+
+기존 `user_id`는 남긴다. 뒤에 공유가 오면 "쓴 사람"으로 쓴다.
+
+**동기화 규칙을 DB가 강제한다(V10)**
+
+- 동기화 자원 표마다 `BEFORE UPDATE` 트리거가 `sync_seq`를 새 번호로 바꾼다. 엔티티의 `sync_seq`는 `insertable = false, updatable = false`, `@Generated(event = {INSERT, UPDATE})`라 JPA는 번호를 쓰지 않고 다시 읽는다.
+- 아이템을 이루는 행(반복 · 시간표 · 시간대 · 칸 버전 · 충돌 후보)이 바뀌면 그 아이템의 번호가 오른다(V6 규칙 4를 넓힘).
+- 지우면 `AFTER DELETE` 트리거가 `sync_tombstones`에 한 줄 넣는다. CASCADE · SET NULL로 DB가 지운 행도 빠지지 않는다. 자원 종류는 API `WorkspaceResourceType`이다: `ITEM` · `COLLECTION` · `LINK` · `OCCURRENCE_EXCEPTION` · `TRASH_BUNDLE` · `ICS_IMPORT_RECORD` · `PIN`(id는 itemId) · `VIEW_STATE`(id는 viewKey) · `CONVERSATION` · `SYSTEM_NOTIFICATION`. 계정 자원(대화 · 알림)은 그 계정의 워크스페이스에 남긴다.
+- 계정이나 워크스페이스가 함께 지워지는 중(탈퇴 정리)이면 tombstone을 건너뛴다.
+- 충돌 후보는 지우지 않고 `resolved_at`을 찍는다. `ConflictDto.syncSeq`는 그룹의 모든 후보 행(풀린 것 포함)과 대상 아이템의 `sync_seq` 가운데 최대이고, 그룹이 다 풀리면 그 번호로 `CONFLICT` `DELETE` 변경을 낸다.
+- 입력 화면 구성(`input_screen_configs`)은 증분 동기화에서 뺀다. 스냅샷과 앱 시작 때 받는다.
+
+**그 밖의 구조(V9)**
+
+- 보일 컬렉션은 모듈마다 따로다. 캘린더(`CALENDAR_LAST_VIEW`)와 시간표(`TIMETABLE`) 보기 상태의 `state_json.hiddenCollectionIds`(끈 목록, 빈 목록 = 모두 보임)에 두고, `user_settings.visible_collection_ids_json`은 없앤다. 기존 값은 켠 목록이 비어 있지 않은 계정만 "켠 목록에 없던 컬렉션"을 두 모듈의 끈 목록으로 옮겼다. 켠 목록이 비어 있으면 옮기지 않는다(모두 보임). 이 열을 쓴 클라이언트가 없어 지금의 `[]`는 "정한 적 없음"이기 때문이다.
+- 서버 공지는 사용자마다 한 줄이다. `system_notifications.user_id`는 NOT NULL이고 인덱스는 `(user_id, sync_seq)`다.
+- `items.created_at`은 기기가 만든 시각이다(`ItemCreateSpec.createdAt`, 서버 시각보다 미래면 서버 시각, 없으면 서버 시각). 감사용 서버 시각은 `items.server_created_at`이다. 엔티티 `Item`이 `@PrePersist`로 이 규칙을 지킨다.
+- 시간표 아이템 사슬: `item_timetables.series_root_id`(처음 아이템은 자기 id) · `effective_from`.
+- 지운 회차의 정본은 `item_exceptions.is_deleted_occurrence`뿐이다. `exdate_json` · `rdate_json`은 ICS로 들어온 값만 담는다.
+- 만들기 · 고치기 · 지우기 · 미루기에 기기가 정한 `operationId`가 필수다. 만들기가 넣은 칸의 `lastWriteId`는 단건이면 `writeId`, 묶음이면 `operationId`다.
+- 칸 키는 `common.domain.FieldKeys`다. 더한 키: `TIME_ZONE` · `HAS_SCHEDULE` · `HAS_TODO` · `HAS_NOTE` · `TIMETABLE_PERIOD` · `PENDING_INBOX` · `EXTRA_FIELD:<키>`. `DUE_AT`의 값 꼴은 `{"dueAt": Instant|null, "dueDate": LocalDate|null}`이고 PATCH는 두 값을 함께 바꾼다.
+
+```sql
+-- 공통 기반 고정 보정 1/2: 워크스페이스 단위로 데이터를 나누고, 고정 전에 정한 구조를 넣는다(2026-11-12).
+-- 이유와 범위는 공통-파일.md 2.7에 있다. 동기화 트리거는 V10이 건다.
+-- 행이 있는 DB에서도 돈다: 새 NOT NULL 열은 NULL로 더하고 채운 뒤 NOT NULL로 바꾼다.
+
+-- =====================================================================
+-- 0. 동기화 규칙 (V6 0절을 고친다. 모든 담당이 지킨다)
+-- =====================================================================
+-- 1) 워크스페이스의 데이터를 바꾸는 트랜잭션은 맨 앞에서
+--    pg_advisory_xact_lock(hashtext(workspace_id::text))를 잡는다(V6의 사용자 잠금을 대신한다).
+--    계정에 속한 동기화 자원(설정 · 대화 · 시스템 알림)도 MVP에서는 그 사용자의 워크스페이스 잠금을 잡는다.
+-- 2) UPDATE의 sync_seq 올리기와 지울 때의 sync_tombstones는 V10 트리거가 한다. 코드가 직접 하지 않는다.
+-- 3) 증분 동기화 커서와 인덱스는 (workspace_id, sync_seq)다.
+-- 4) 입력 화면 구성(input_screen_configs)은 증분 동기화에서 뺀다. 스냅샷과 앱 시작 때 받는다.
+
+-- =====================================================================
+-- 1. 워크스페이스
+-- =====================================================================
+
+-- 한 계정이 여럿 가질 수 있게 둔다. MVP 동안은 계정마다 하나(UNIQUE owner_user_id)이고, 가입할 때 만든다.
+CREATE TABLE IF NOT EXISTS workspaces (
+    id              UUID PRIMARY KEY,
+    owner_user_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_workspaces_owner UNIQUE (owner_user_id)
+);
+
+INSERT INTO workspaces (id, owner_user_id)
+SELECT gen_random_uuid(), u.id FROM users u
+WHERE NOT EXISTS (SELECT 1 FROM workspaces w WHERE w.owner_user_id = u.id);
+
+-- 워크스페이스에 속한 표: 아이템 · 컬렉션과 그에 딸린 표, 그 보기 상태, 동기화 tombstone.
+-- user_id는 남긴다(공유가 오면 "쓴 사람"). 계정에 속한 표는 user_id 그대로다(공통-파일.md 2.7 표).
+ALTER TABLE collections ADD COLUMN workspace_id UUID NULL;
+ALTER TABLE items ADD COLUMN workspace_id UUID NULL;
+ALTER TABLE item_links ADD COLUMN workspace_id UUID NULL;
+ALTER TABLE item_recurrences ADD COLUMN workspace_id UUID NULL;
+ALTER TABLE item_exceptions ADD COLUMN workspace_id UUID NULL;
+ALTER TABLE item_timetables ADD COLUMN workspace_id UUID NULL;
+ALTER TABLE timetable_slots ADD COLUMN workspace_id UUID NULL;
+ALTER TABLE item_field_versions ADD COLUMN workspace_id UUID NULL;
+ALTER TABLE item_field_writes ADD COLUMN workspace_id UUID NULL;
+ALTER TABLE conflict_candidates ADD COLUMN workspace_id UUID NULL;
+ALTER TABLE trash_bundles ADD COLUMN workspace_id UUID NULL;
+ALTER TABLE user_pinned_items ADD COLUMN workspace_id UUID NULL;
+ALTER TABLE ics_import_records ADD COLUMN workspace_id UUID NULL;
+ALTER TABLE user_view_states ADD COLUMN workspace_id UUID NULL;
+ALTER TABLE sync_tombstones ADD COLUMN workspace_id UUID NULL;
+
+UPDATE collections t SET workspace_id = w.id FROM workspaces w WHERE w.owner_user_id = t.user_id;
+UPDATE items t SET workspace_id = w.id FROM workspaces w WHERE w.owner_user_id = t.user_id;
+UPDATE item_links t SET workspace_id = w.id FROM workspaces w WHERE w.owner_user_id = t.user_id;
+UPDATE item_recurrences t SET workspace_id = w.id FROM workspaces w WHERE w.owner_user_id = t.user_id;
+UPDATE item_exceptions t SET workspace_id = w.id FROM workspaces w WHERE w.owner_user_id = t.user_id;
+UPDATE item_timetables t SET workspace_id = w.id FROM workspaces w WHERE w.owner_user_id = t.user_id;
+UPDATE timetable_slots t SET workspace_id = w.id FROM workspaces w WHERE w.owner_user_id = t.user_id;
+UPDATE item_field_versions t SET workspace_id = w.id FROM workspaces w WHERE w.owner_user_id = t.user_id;
+UPDATE item_field_writes t SET workspace_id = w.id FROM workspaces w WHERE w.owner_user_id = t.user_id;
+UPDATE conflict_candidates t SET workspace_id = w.id FROM workspaces w WHERE w.owner_user_id = t.user_id;
+UPDATE trash_bundles t SET workspace_id = w.id FROM workspaces w WHERE w.owner_user_id = t.user_id;
+UPDATE user_pinned_items t SET workspace_id = w.id FROM workspaces w WHERE w.owner_user_id = t.user_id;
+UPDATE ics_import_records t SET workspace_id = w.id FROM workspaces w WHERE w.owner_user_id = t.user_id;
+UPDATE user_view_states t SET workspace_id = w.id FROM workspaces w WHERE w.owner_user_id = t.user_id;
+UPDATE sync_tombstones t SET workspace_id = w.id FROM workspaces w WHERE w.owner_user_id = t.user_id;
+
+ALTER TABLE collections ALTER COLUMN workspace_id SET NOT NULL;
+ALTER TABLE items ALTER COLUMN workspace_id SET NOT NULL;
+ALTER TABLE item_links ALTER COLUMN workspace_id SET NOT NULL;
+ALTER TABLE item_recurrences ALTER COLUMN workspace_id SET NOT NULL;
+ALTER TABLE item_exceptions ALTER COLUMN workspace_id SET NOT NULL;
+ALTER TABLE item_timetables ALTER COLUMN workspace_id SET NOT NULL;
+ALTER TABLE timetable_slots ALTER COLUMN workspace_id SET NOT NULL;
+ALTER TABLE item_field_versions ALTER COLUMN workspace_id SET NOT NULL;
+ALTER TABLE item_field_writes ALTER COLUMN workspace_id SET NOT NULL;
+ALTER TABLE conflict_candidates ALTER COLUMN workspace_id SET NOT NULL;
+ALTER TABLE trash_bundles ALTER COLUMN workspace_id SET NOT NULL;
+ALTER TABLE user_pinned_items ALTER COLUMN workspace_id SET NOT NULL;
+ALTER TABLE ics_import_records ALTER COLUMN workspace_id SET NOT NULL;
+ALTER TABLE user_view_states ALTER COLUMN workspace_id SET NOT NULL;
+ALTER TABLE sync_tombstones ALTER COLUMN workspace_id SET NOT NULL;
+
+ALTER TABLE collections ADD CONSTRAINT fk_collections_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+ALTER TABLE items ADD CONSTRAINT fk_items_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+ALTER TABLE item_links ADD CONSTRAINT fk_item_links_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+ALTER TABLE item_recurrences ADD CONSTRAINT fk_item_recurrences_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+ALTER TABLE item_exceptions ADD CONSTRAINT fk_item_exceptions_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+ALTER TABLE item_timetables ADD CONSTRAINT fk_item_timetables_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+ALTER TABLE timetable_slots ADD CONSTRAINT fk_timetable_slots_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+ALTER TABLE item_field_versions ADD CONSTRAINT fk_item_field_versions_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+ALTER TABLE item_field_writes ADD CONSTRAINT fk_item_field_writes_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+ALTER TABLE conflict_candidates ADD CONSTRAINT fk_conflict_candidates_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+ALTER TABLE trash_bundles ADD CONSTRAINT fk_trash_bundles_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+ALTER TABLE user_pinned_items ADD CONSTRAINT fk_user_pinned_items_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+ALTER TABLE ics_import_records ADD CONSTRAINT fk_ics_import_records_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+ALTER TABLE user_view_states ADD CONSTRAINT fk_user_view_states_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+ALTER TABLE sync_tombstones ADD CONSTRAINT fk_sync_tombstones_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+
+-- 증분 동기화 인덱스를 워크스페이스 단위로 바꾼다.
+DROP INDEX IF EXISTS idx_collections_user_sync;
+DROP INDEX IF EXISTS idx_items_user_sync;
+DROP INDEX IF EXISTS idx_item_links_user_sync;
+DROP INDEX IF EXISTS idx_item_exceptions_user_sync;
+DROP INDEX IF EXISTS idx_conflict_candidates_user_sync;
+DROP INDEX IF EXISTS idx_trash_bundles_user_sync;
+DROP INDEX IF EXISTS idx_ics_import_records_user_sync;
+DROP INDEX IF EXISTS idx_sync_tombstones_user_sync;
+CREATE INDEX IF NOT EXISTS idx_collections_workspace_sync ON collections(workspace_id, sync_seq);
+CREATE INDEX IF NOT EXISTS idx_items_workspace_sync ON items(workspace_id, sync_seq);
+CREATE INDEX IF NOT EXISTS idx_item_links_workspace_sync ON item_links(workspace_id, sync_seq);
+CREATE INDEX IF NOT EXISTS idx_item_exceptions_workspace_sync ON item_exceptions(workspace_id, sync_seq);
+CREATE INDEX IF NOT EXISTS idx_conflict_candidates_workspace_sync ON conflict_candidates(workspace_id, sync_seq);
+CREATE INDEX IF NOT EXISTS idx_trash_bundles_workspace_sync ON trash_bundles(workspace_id, sync_seq);
+CREATE INDEX IF NOT EXISTS idx_ics_import_records_workspace_sync ON ics_import_records(workspace_id, sync_seq);
+CREATE INDEX IF NOT EXISTS idx_sync_tombstones_workspace_sync ON sync_tombstones(workspace_id, sync_seq);
+CREATE INDEX IF NOT EXISTS idx_user_view_states_workspace_sync ON user_view_states(workspace_id, sync_seq);
+CREATE INDEX IF NOT EXISTS idx_user_pinned_items_workspace_sync ON user_pinned_items(workspace_id, sync_seq);
+CREATE INDEX IF NOT EXISTS idx_items_workspace_collection ON items(workspace_id, collection_id);
+-- 계정에 속한 동기화 자원도 같은 스트림으로 읽는다. 대화 · 설정은 (user_id, sync_seq) 인덱스나 키가 이미 있다.
+CREATE INDEX IF NOT EXISTS idx_system_notifications_user_sync ON system_notifications(user_id, sync_seq);
+
+-- 보기 상태는 (워크스페이스, 사용자, 보기)마다 하나다.
+ALTER TABLE user_view_states DROP CONSTRAINT user_view_states_user_id_view_key_key;
+ALTER TABLE user_view_states ADD CONSTRAINT uq_user_view_states_view UNIQUE (workspace_id, user_id, view_key);
+
+-- =====================================================================
+-- 2. 보일 컬렉션: 설정의 "켠 목록"을 모듈별 보기 상태의 "끈 목록"으로 옮긴다
+-- =====================================================================
+-- 캘린더(CALENDAR_LAST_VIEW)와 시간표(TIMETABLE)가 각자 state_json.hiddenCollectionIds를 갖는다.
+-- 빈 목록이면 모두 보이므로 새 컬렉션은 보이는 채 생긴다.
+-- 옮기는 값: 켠 목록이 비어 있지 않은 계정의, 켠 목록에 없는 컬렉션.
+-- 켠 목록이 비어 있으면 옮기지 않는다(끈 목록 없음 = 모두 보임). 이 열을 쓴 클라이언트가 없어서
+-- 지금 DB의 []는 "모두 끔"이 아니라 "정한 적 없음"이다. 모두 끈 것으로 옮기면 배포 뒤 컬렉션이 모두 숨는다.
+INSERT INTO user_view_states (id, user_id, workspace_id, view_key, state_json)
+SELECT gen_random_uuid(), s.user_id, w.id, v.view_key, jsonb_build_object('hiddenCollectionIds', h.hidden)
+FROM user_settings s
+JOIN workspaces w ON w.owner_user_id = s.user_id
+CROSS JOIN (VALUES ('CALENDAR_LAST_VIEW'), ('TIMETABLE')) AS v(view_key)
+CROSS JOIN LATERAL (
+    SELECT jsonb_agg(c.id::text ORDER BY c.id) AS hidden
+    FROM collections c
+    WHERE c.user_id = s.user_id
+      AND NOT (s.visible_collection_ids_json ? c.id::text)
+) h
+WHERE jsonb_array_length(s.visible_collection_ids_json) > 0
+  AND h.hidden IS NOT NULL
+ON CONFLICT (workspace_id, user_id, view_key)
+DO UPDATE SET state_json = user_view_states.state_json || EXCLUDED.state_json;
+
+ALTER TABLE user_settings DROP COLUMN visible_collection_ids_json;
+
+-- =====================================================================
+-- 3. 서버 공지는 사용자마다 한 줄이다
+-- =====================================================================
+-- 사용자 없는 공지는 어느 잠금에도 들지 않아 커서를 건너뛴다. 사용자마다 펼쳐 넣고 user_id를 NOT NULL로 둔다.
+INSERT INTO system_notifications (id, user_id, notification_type, payload_enc, created_at)
+SELECT gen_random_uuid(), u.id, n.notification_type, n.payload_enc, n.created_at
+FROM system_notifications n CROSS JOIN users u
+WHERE n.user_id IS NULL;
+DELETE FROM system_notifications WHERE user_id IS NULL;
+ALTER TABLE system_notifications ALTER COLUMN user_id SET NOT NULL;
+
+-- =====================================================================
+-- 4. 아이템 만든 시각과 시간표 사슬
+-- =====================================================================
+-- items.created_at은 기기가 만든 시각이다(ItemCreateSpec.createdAt, 서버 시각보다 미래면 서버 시각).
+-- 날짜 없는 아이템의 만든 날을 이 값으로 정한다(F-26). 감사용 서버 시각은 server_created_at이다.
+ALTER TABLE items ADD COLUMN server_created_at TIMESTAMPTZ NULL;
+UPDATE items SET server_created_at = created_at;
+ALTER TABLE items ALTER COLUMN server_created_at SET NOT NULL;
+ALTER TABLE items ALTER COLUMN server_created_at SET DEFAULT NOW();
+
+-- 시간표 아이템도 적용 시작일로 나뉜다(F-33). 사슬 id는 나뉜 앞뒤 아이템이 함께 쓰고, 처음 아이템은 자기 id다.
+ALTER TABLE item_timetables ADD COLUMN series_root_id UUID NULL;
+ALTER TABLE item_timetables ADD COLUMN effective_from DATE NULL;
+UPDATE item_timetables SET series_root_id = item_id;
+ALTER TABLE item_timetables ALTER COLUMN series_root_id SET NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_item_timetables_series ON item_timetables(workspace_id, series_root_id);
+
+-- 지운 회차의 정본은 item_exceptions(is_deleted_occurrence)뿐이다.
+-- item_recurrences.exdate_json · rdate_json은 ICS로 들어온 값만 담고 반복 규칙 칸(RECURRENCE_RULE)과 함께 바뀐다.
+COMMENT ON COLUMN item_recurrences.exdate_json IS 'ICS로 들어온 EXDATE만. 사용자가 지운 회차는 item_exceptions.is_deleted_occurrence';
+COMMENT ON COLUMN item_recurrences.rdate_json IS 'ICS로 들어온 RDATE만';
+```
+
+```sql
+-- 공통 기반 고정 보정 2/2: 동기화 규칙을 DB 트리거로 강제한다(2026-11-12).
+-- 이유와 범위는 공통-파일.md 2.7에 있다.
+-- V6 0절의 규칙 2 · 3 · 4(UPDATE마다 sync_seq, 지우면 tombstone, 아이템을 이루는 행이 바뀌면 아이템 번호)를
+-- 세 담당의 코드 관례로 두면 한 경로라도 빠질 때 다른 기기에 영영 가지 않는다. CASCADE · SET NULL처럼
+-- DB가 스스로 바꾸는 행은 관례로 덮을 수도 없다. 그래서 여기서 강제하고, 코드는 직접 하지 않는다.
+
+-- =====================================================================
+-- 1. UPDATE마다 새 번호
+-- =====================================================================
+CREATE OR REPLACE FUNCTION bedrock_bump_sync_seq() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.sync_seq := nextval('workspace_sync_seq');
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_collections_sync_seq BEFORE UPDATE ON collections FOR EACH ROW EXECUTE FUNCTION bedrock_bump_sync_seq();
+CREATE TRIGGER trg_items_sync_seq BEFORE UPDATE ON items FOR EACH ROW EXECUTE FUNCTION bedrock_bump_sync_seq();
+CREATE TRIGGER trg_item_links_sync_seq BEFORE UPDATE ON item_links FOR EACH ROW EXECUTE FUNCTION bedrock_bump_sync_seq();
+CREATE TRIGGER trg_item_exceptions_sync_seq BEFORE UPDATE ON item_exceptions FOR EACH ROW EXECUTE FUNCTION bedrock_bump_sync_seq();
+CREATE TRIGGER trg_conflict_candidates_sync_seq BEFORE UPDATE ON conflict_candidates FOR EACH ROW EXECUTE FUNCTION bedrock_bump_sync_seq();
+CREATE TRIGGER trg_trash_bundles_sync_seq BEFORE UPDATE ON trash_bundles FOR EACH ROW EXECUTE FUNCTION bedrock_bump_sync_seq();
+CREATE TRIGGER trg_ics_import_records_sync_seq BEFORE UPDATE ON ics_import_records FOR EACH ROW EXECUTE FUNCTION bedrock_bump_sync_seq();
+CREATE TRIGGER trg_user_pinned_items_sync_seq BEFORE UPDATE ON user_pinned_items FOR EACH ROW EXECUTE FUNCTION bedrock_bump_sync_seq();
+CREATE TRIGGER trg_user_view_states_sync_seq BEFORE UPDATE ON user_view_states FOR EACH ROW EXECUTE FUNCTION bedrock_bump_sync_seq();
+CREATE TRIGGER trg_user_settings_sync_seq BEFORE UPDATE ON user_settings FOR EACH ROW EXECUTE FUNCTION bedrock_bump_sync_seq();
+CREATE TRIGGER trg_conversations_sync_seq BEFORE UPDATE ON conversations FOR EACH ROW EXECUTE FUNCTION bedrock_bump_sync_seq();
+CREATE TRIGGER trg_system_notifications_sync_seq BEFORE UPDATE ON system_notifications FOR EACH ROW EXECUTE FUNCTION bedrock_bump_sync_seq();
+-- input_screen_configs는 증분 동기화에서 뺐으므로(V9 0절 4) 트리거를 걸지 않는다.
+
+-- =====================================================================
+-- 2. 아이템을 이루는 행이 바뀌면 아이템 번호를 올린다 (V6 규칙 4 + 충돌 후보 · 칸 버전)
+-- =====================================================================
+-- ItemDto에 함께 실리는 반복 · 시간표 · 시간대 · 칸 버전 · 충돌 후보가 바뀌면 아이템을 다시 보내야 한다.
+-- items의 BEFORE UPDATE 트리거가 새 번호를 준다. 아이템이 함께 지워지는 중이면 고칠 행이 없어 아무 일도 없다.
+CREATE OR REPLACE FUNCTION bedrock_touch_parent_item() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        UPDATE items SET sync_seq = sync_seq WHERE id = OLD.item_id;
+    ELSE
+        UPDATE items SET sync_seq = sync_seq WHERE id = NEW.item_id;
+        IF TG_OP = 'UPDATE' AND NEW.item_id IS DISTINCT FROM OLD.item_id THEN
+            UPDATE items SET sync_seq = sync_seq WHERE id = OLD.item_id;
+        END IF;
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER trg_item_recurrences_touch_item AFTER INSERT OR UPDATE OR DELETE ON item_recurrences FOR EACH ROW EXECUTE FUNCTION bedrock_touch_parent_item();
+CREATE TRIGGER trg_item_timetables_touch_item AFTER INSERT OR UPDATE OR DELETE ON item_timetables FOR EACH ROW EXECUTE FUNCTION bedrock_touch_parent_item();
+CREATE TRIGGER trg_timetable_slots_touch_item AFTER INSERT OR UPDATE OR DELETE ON timetable_slots FOR EACH ROW EXECUTE FUNCTION bedrock_touch_parent_item();
+CREATE TRIGGER trg_item_field_versions_touch_item AFTER INSERT OR UPDATE OR DELETE ON item_field_versions FOR EACH ROW EXECUTE FUNCTION bedrock_touch_parent_item();
+CREATE TRIGGER trg_conflict_candidates_touch_item AFTER INSERT OR UPDATE OR DELETE ON conflict_candidates FOR EACH ROW EXECUTE FUNCTION bedrock_touch_parent_item();
+
+-- =====================================================================
+-- 3. 지우면 tombstone 한 줄
+-- =====================================================================
+-- 인자: 자원 종류(API WorkspaceResourceType), resourceId로 쓸 열 이름.
+-- 워크스페이스 표는 그 행의 workspace_id, 계정 표(대화 · 시스템 알림)는 MVP의 계정 워크스페이스에 남긴다.
+-- 계정이나 워크스페이스가 함께 지워지는 중이면(탈퇴 정리) 남길 곳이 없으므로 건너뛴다.
+CREATE OR REPLACE FUNCTION bedrock_record_tombstone() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    old_row      jsonb := to_jsonb(OLD);
+    owner_id     uuid := (old_row ->> 'user_id')::uuid;
+    target_ws    uuid := (old_row ->> 'workspace_id')::uuid;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM users WHERE id = owner_id) THEN
+        RETURN NULL;
+    END IF;
+    IF target_ws IS NULL THEN
+        SELECT id INTO target_ws FROM workspaces WHERE owner_user_id = owner_id;
+    END IF;
+    IF target_ws IS NULL OR NOT EXISTS (SELECT 1 FROM workspaces WHERE id = target_ws) THEN
+        RETURN NULL;
+    END IF;
+    INSERT INTO sync_tombstones (user_id, workspace_id, resource_type, resource_id)
+    VALUES (owner_id, target_ws, TG_ARGV[0], old_row ->> TG_ARGV[1]);
+    RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER trg_collections_tombstone AFTER DELETE ON collections FOR EACH ROW EXECUTE FUNCTION bedrock_record_tombstone('COLLECTION', 'id');
+CREATE TRIGGER trg_items_tombstone AFTER DELETE ON items FOR EACH ROW EXECUTE FUNCTION bedrock_record_tombstone('ITEM', 'id');
+CREATE TRIGGER trg_item_links_tombstone AFTER DELETE ON item_links FOR EACH ROW EXECUTE FUNCTION bedrock_record_tombstone('LINK', 'id');
+CREATE TRIGGER trg_item_exceptions_tombstone AFTER DELETE ON item_exceptions FOR EACH ROW EXECUTE FUNCTION bedrock_record_tombstone('OCCURRENCE_EXCEPTION', 'id');
+CREATE TRIGGER trg_trash_bundles_tombstone AFTER DELETE ON trash_bundles FOR EACH ROW EXECUTE FUNCTION bedrock_record_tombstone('TRASH_BUNDLE', 'id');
+CREATE TRIGGER trg_ics_import_records_tombstone AFTER DELETE ON ics_import_records FOR EACH ROW EXECUTE FUNCTION bedrock_record_tombstone('ICS_IMPORT_RECORD', 'id');
+CREATE TRIGGER trg_user_pinned_items_tombstone AFTER DELETE ON user_pinned_items FOR EACH ROW EXECUTE FUNCTION bedrock_record_tombstone('PIN', 'item_id');
+CREATE TRIGGER trg_user_view_states_tombstone AFTER DELETE ON user_view_states FOR EACH ROW EXECUTE FUNCTION bedrock_record_tombstone('VIEW_STATE', 'view_key');
+CREATE TRIGGER trg_conversations_tombstone AFTER DELETE ON conversations FOR EACH ROW EXECUTE FUNCTION bedrock_record_tombstone('CONVERSATION', 'id');
+CREATE TRIGGER trg_system_notifications_tombstone AFTER DELETE ON system_notifications FOR EACH ROW EXECUTE FUNCTION bedrock_record_tombstone('SYSTEM_NOTIFICATION', 'id');
+-- 충돌 후보는 지우지 않고 resolved_at을 찍는다(UPDATE). 그룹이 다 풀리면 API가 그 번호로 CONFLICT DELETE 변경을 낸다.
+-- 아이템과 함께 지워진 후보는 ITEM tombstone으로 충분하다. 설정 행은 계정과 함께만 지워진다.
+```
+
+---
+
+# 3. 공통 응답 틀 · 담당별 에러 코드 · 공통 Enum
+
+## 3.1 공통 응답과 에러 코드 인터페이스 (`common/response`, `common/error`)
+
+에러 코드는 공통 인터페이스(`ErrorCode`) 하나를 두고, 실제 Enum 파일은 **BE 1 · BE 2 · BE 3 세 파일로 분리**해 각자 자유롭게 추가한다.
+
+```java
+package com.bedrock.app.common.response;
+
+public record ApiResponse<T>(
+        boolean success,
+        T data,
+        ErrorBody error
+) {
+    public static <T> ApiResponse<T> ok(T data) {
+        return new ApiResponse<>(true, data, null);
+    }
+
+    public static ApiResponse<Void> ok() {
+        return new ApiResponse<>(true, null, null);
+    }
+
+    public static <T> ApiResponse<T> fail(String code, String message, Object details) {
+        return new ApiResponse<>(false, null, new ErrorBody(code, message, details));
+    }
+
+    public record ErrorBody(String code, String message, Object details) {}
+}
+```
+
+```java
+package com.bedrock.app.common.error;
+
+import org.springframework.http.HttpStatus;
+
+public interface ErrorCode {
+    String name();
+    HttpStatus status();
+    String message();
+}
+```
+
+```java
+package com.bedrock.app.common.error;
+
+// BE 1만 수정하는 에러 코드 파일
+import org.springframework.http.HttpStatus;
+
+public enum Be1AuthAiErrorCode implements ErrorCode {
+    UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다."),
+    INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다."),
+    INVALID_MAIL_CODE(HttpStatus.BAD_REQUEST, "인증 코드가 올바르지 않거나 만료되었습니다."),
+    MAIL_CODE_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "잠시 후 다시 시도해 주세요."),
+    AI_CONSENT_REQUIRED(HttpStatus.FORBIDDEN, "AI 해석 동의가 필요합니다."),
+    OCR_CONSENT_REQUIRED(HttpStatus.FORBIDDEN, "캡처 서버 인식 동의가 필요합니다."),
+    AI_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "AI 호출 한도를 초과했습니다."),
+    AI_TIMEOUT_OR_INVALID_SCHEMA(HttpStatus.BAD_GATEWAY, "문장을 해석하지 못했습니다.");
+
+    private final HttpStatus status;
+    private final String message;
+
+    Be1AuthAiErrorCode(HttpStatus status, String message) {
+        this.status = status;
+        this.message = message;
+    }
+
+    @Override public HttpStatus status() { return status; }
+    @Override public String message() { return message; }
+}
+```
+
+```java
+package com.bedrock.app.common.error;
+
+// BE 2만 수정하는 에러 코드 파일
+import org.springframework.http.HttpStatus;
+
+public enum Be2SyncItemErrorCode implements ErrorCode {
+    RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "대상을 찾을 수 없습니다."), // 없는 대상과 권한 없는 대상은 같은 응답(4.3)
+    ACCOUNT_MISMATCH(HttpStatus.FORBIDDEN, "탭의 계정과 세션 계정이 일치하지 않습니다."),
+    WRITE_REJECTED_VALIDATION(HttpStatus.BAD_REQUEST, "입력 값이 유효하지 않습니다."),
+    WRITE_REJECTED_PURGED(HttpStatus.GONE, "영구 삭제된 대상입니다."),
+    UNDO_BLOCKED_BY_LATER_CHANGE(HttpStatus.CONFLICT, "이후 변경이 남아 있어 되돌릴 수 없습니다."),
+    BATCH_ATOMIC_WRITE_FAILED(HttpStatus.BAD_REQUEST, "묶음 저장에 실패하여 전체를 되돌렸습니다.");
+
+    private final HttpStatus status;
+    private final String message;
+
+    Be2SyncItemErrorCode(HttpStatus status, String message) {
+        this.status = status;
+        this.message = message;
+    }
+
+    @Override public HttpStatus status() { return status; }
+    @Override public String message() { return message; }
+}
+```
+
+```java
+package com.bedrock.app.common.error;
+
+// BE 3만 수정하는 에러 코드 파일
+import org.springframework.http.HttpStatus;
+
+public enum Be3ScheduleErrorCode implements ErrorCode {
+    DEFAULT_COLLECTION_CANNOT_DELETE(HttpStatus.BAD_REQUEST, "기본 컬렉션은 지울 수 없습니다."),
+    TIMETABLE_SLOT_OVERLAP(HttpStatus.CONFLICT, "같은 컬렉션의 시간표 시간대와 겹칩니다."),
+    INVALID_RECURRENCE_SPLIT_BOUNDARY(HttpStatus.BAD_REQUEST, "적용 시작일 범위를 나눌 수 없습니다."),
+    POSTPONE_UNDO_NOT_ALLOWED(HttpStatus.CONFLICT, "이월본이 미완료 상태일 때만 되돌릴 수 있습니다."),
+    INVALID_ICS_FORMAT(HttpStatus.BAD_REQUEST, "유효하지 않은 ICS 파일입니다.");
+
+    private final HttpStatus status;
+    private final String message;
+
+    Be3ScheduleErrorCode(HttpStatus status, String message) {
+        this.status = status;
+        this.message = message;
+    }
+
+    @Override public HttpStatus status() { return status; }
+    @Override public String message() { return message; }
+}
+```
+
+## 3.2 공통 도메인 Enum (`common/domain`)
+
+```java
+package com.bedrock.app.common.domain;
+
+// F-12: 스와치 이름 (hex로 저장하지 않음)
+public enum SwatchColor {
+    RED, ORANGE, AMBER, GREEN, TEAL, BLUE, INDIGO, PINK, GRAY
+}
+```
+
+```java
+package com.bedrock.app.common.domain;
+
+// F-17: 할 일 상태 넷
+public enum TodoStatus {
+    TODO, DONE, POSTPONED, CANCELLED
+}
+```
+
+```java
+package com.bedrock.app.common.domain;
+
+// F-16: 아이템 연결 종류 다섯
+public enum LinkType {
+    CREATED_FROM, REFERENCE, DERIVED_FROM, POSTPONED_TO, SPLIT_FROM
+}
+```
+
+---
+
+# 4. 담당 간 내부 호출 인터페이스 (`common/port`)
+
+1단계에서 아래 인터페이스 5개와 기본 Stub 구현체(`common/config/PortStubAutoConfiguration`, 호출하면 `503 FEATURE_NOT_READY`)를 `main`에 넣어 둔다. 다른 담당의 기능은 이 인터페이스만 주입받아 호출한다.
+
+## 4.1 사용자 글 암복호화 (`BE 1` 제공 → `BE 2 · BE 3` 호출)
+
+```java
+package com.bedrock.app.common.port;
+
+import java.util.UUID;
+
+/**
+ * 명세 4.4: 사람이 적는 글(이름 · 본문 · 장소 · 태그 · 가져온 ICS 값 · 컬렉션 이름 · 지침 · 이력 · 충돌 · 대화 기록)을
+ * 사용자별 데이터 키(DEK + KMS)로 암호화하고 복호화한다.
+ */
+public interface UserCryptoPort {
+    void createDataKeyForUser(UUID userId);
+    String encrypt(UUID userId, String plainText);
+    String decrypt(UUID userId, String cipherText);
+    void deleteDataKeyForUser(UUID userId);
+}
+```
+
+## 4.2 아이템 단건 · 묶음 쓰기 (`BE 2` 제공 → `BE 1 · BE 3` 호출)
+
+```java
+package com.bedrock.app.common.port;
+
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+/**
+ * 명세 F-43 · F-18 · F-31 · F-34 · F-42 · F-49:
+ * 만들기 · 고치기 · 지우기 · 회차 예외 · 반복 나누기 · 미루기를 한 묶음(전부 아니면 없음)으로 실행하고,
+ * (userId, batchId)로 재전송 중복 적용을 막는다. 같은 aiRequestId는 묶음 ID가 달라도 한 번만 완료한다.
+ * 필드 구성은 「API 명세 합의 v1.0」의 BatchWriteRequest를 따른다.
+ * 묶음 안 연산이 칸을 바꾸면 그 칸의 lastWriteId와 item_field_writes.write_id에는 batchId가 아니라
+ * 그 연산의 operationId를 남긴다. 기기가 미리 정한 값이라 뒤 쓰기의 baseFieldVersions로 실을 수 있다.
+ * 만들기도 같다: 만들기가 값을 넣은 칸의 lastWriteId는 단건이면 writeId, 묶음이면 그 만들기의 operationId다.
+ * 만들기 · 고치기 · 지우기 · 미루기의 operationId는 기기가 정하고 필수이며 묶음 안에서 하나뿐이다.
+ * 쓰기는 대상 워크스페이스의 잠금(pg_advisory_xact_lock(hashtext(workspace_id::text))) 안에서 한다(V9).
+ */
+public interface ItemBatchWritePort {
+
+    BatchWriteResult executeAtomicBatch(UUID userId, BatchWriteCommand command);
+
+    BatchStatusResult getBatchStatus(UUID userId, UUID batchId);
+
+    record BatchWriteCommand(
+            UUID batchId,
+            String batchType, // AI_MUTATION | TIMETABLE_CREATE | TODO_POSTPONE | ICS_IMPORT | BULK_DELETE
+            UUID aiRequestId, // AI 저장일 때만
+            String expectedAiRevision, // AI 저장일 때만
+            UUID conversationId, // 대화 기록과 이어진 저장일 때
+            CollectionCreateSpec newCollection, // TIMETABLE_CREATE에서만
+            List<ItemCreateSpec> creates,
+            List<ItemPatchSpec> patches,
+            List<ItemDeleteSpec> deletes,
+            List<LinkSpec> linksToUpsert,
+            List<PostponeSpec> postpones, // 여러 할 일을 한 묶음으로 미룰 수 있다(F-18 · F-43)
+            PendingInboxCompletion pendingInboxCompletion // 정리 대기 재시도 완료일 때(F-49)
+    ) {}
+
+    /**
+     * 반복 회차의 정체성. 시간표 회차는 slotId까지, 일반 반복은 slotId가 null이다.
+     * recurrenceDate는 마스터 아이템 시간대(timeZone)의 날짜다. 시간표 회차는 시간대 없는 요일의 날짜다.
+     */
+    record OccurrenceRef(UUID masterItemId, LocalDate recurrenceDate, UUID slotId) {}
+
+    record ItemTarget(UUID itemId, OccurrenceRef occurrence) {}
+
+    record ItemCreateSpec(
+            UUID operationId, // 기기가 정한 연산 ID. 만들기가 넣은 칸의 lastWriteId가 된다
+            UUID itemId,
+            Instant createdAt, // 기기가 만든 시각. 비었거나 서버 시각보다 미래면 서버 시각(items.created_at, F-26)
+            UUID collectionId, // null이면 기본 컬렉션
+            String inputConfigCode,
+            Map<String, Object> fields,
+            RecurrenceSpec recurrence,
+            TimetableSpec timetable,
+            List<UUID> referenceTargetIds
+    ) {}
+
+    record ItemPatchSpec(
+            UUID operationId,
+            UUID itemId,
+            String scope, // SINGLE | THIS_OCCURRENCE | THIS_AND_FUTURE | ALL
+            OccurrenceRef occurrence,
+            LocalDate effectiveDate,
+            Map<String, UUID> baseFieldVersions, // 칸별 기준 쓰기. 값 null은 이전 쓰기가 없던 칸
+            Map<String, Object> changedFields,
+            List<UUID> referenceTargetIds, // 본문이 바뀔 때만. null과 빈 목록을 가른다
+            boolean materializeForLink
+    ) {}
+
+    record ItemDeleteSpec(
+            UUID operationId,
+            UUID itemId,
+            String scope, // SINGLE | THIS_OCCURRENCE | THIS_AND_FUTURE | ALL
+            OccurrenceRef occurrence,
+            LocalDate effectiveDate,
+            Map<String, UUID> baseFieldVersions,
+            boolean deleteDerivedCreatedFromItems
+    ) {}
+
+    record PostponeSpec(
+            UUID operationId,
+            ItemTarget source,
+            String mode, // TO_DATE | SKIP_TO_NEXT
+            UUID carryItemId,
+            ScheduleValue destination,
+            Map<String, UUID> baseFieldVersions
+    ) {}
+
+    record ScheduleValue(boolean isAllDay, Instant startAt, Instant endAt, LocalDate startDate, LocalDate endDate) {}
+
+    record PendingInboxCompletion(
+            UUID itemId,
+            Map<String, UUID> baseFieldVersions,
+            String action // TRASH_ITEM | CLEAR_PENDING_FLAG
+    ) {}
+
+    record CollectionCreateSpec(UUID collectionId, String name, String color, String icon) {}
+
+    /** rdates · exdates · untilDate · effectiveFrom은 마스터 아이템 시간대(timeZone)의 날짜다. */
+    record RecurrenceSpec(
+            String rrule,
+            List<LocalDate> rdates,
+            List<LocalDate> exdates,
+            LocalDate untilDate,
+            LocalDate effectiveFrom
+    ) {}
+
+    /** 시간표 아이템의 기간은 아이템마다 하나이고, 시간대는 slotId로 가린다(F-30). */
+    record TimetableSpec(
+            List<TimetableSlotSpec> slots,
+            LocalDate periodStart,
+            LocalDate periodEnd,
+            UUID seriesRootId, // 나뉜 시간표 아이템 사슬의 루트. 일반 만들기에서는 서버가 자기 itemId로 정한다
+            LocalDate effectiveFrom // 나뉜 뒤 아이템의 적용 시작일(주의 월요일). 처음 아이템은 null
+    ) {}
+
+    record TimetableSlotSpec(UUID slotId, int dayOfWeek, LocalTime startTime, LocalTime endTime) {}
+
+    record LinkSpec(UUID sourceItemId, UUID targetItemId, String linkType) {}
+
+    record MutationResult(
+            UUID resultId,
+            UUID operationId,
+            UUID itemId,
+            List<UUID> affectedItemIds,
+            String scope,
+            List<String> changedFieldKeys,
+            UUID trashBundleId,
+            boolean undoSupported
+    ) {}
+
+    record BatchWriteResult(
+            UUID batchId,
+            boolean alreadyProcessed,
+            List<UUID> affectedItemIds,
+            List<MutationResult> results,
+            long latestSyncSeq
+    ) {}
+
+    record BatchStatusResult(UUID batchId, String status, BatchWriteResult result) {}
+}
+```
+
+## 4.3 충돌 후보 등록 (`BE 2` 제공 → `BE 3` 호출)
+
+```java
+package com.bedrock.app.common.port;
+
+import java.util.UUID;
+
+/**
+ * 명세 F-24 · F-42 · F-45:
+ * 반복 마스터 변경이나 ICS 재가져오기로 짝을 잃거나 다른 회차와 겹친 예외 회차를
+ * 풀지 않은 충돌(kind = ORPHANED_OCCURRENCE)로 등록한다. 회차는 시간표면 slotId까지 가린다.
+ */
+public interface ConflictRegistryPort {
+    void registerOrphanedOccurrenceConflict(
+            UUID userId,
+            ItemBatchWritePort.OccurrenceRef occurrence,
+            String fieldKey,
+            String plainCandidateJson,
+            UUID sourceWriteId
+    );
+}
+```
+
+## 4.4 반복 · 시간표 연산 연동 (`BE 3` 제공 → `BE 2` 호출)
+
+```java
+package com.bedrock.app.common.port;
+
+import java.time.LocalDate;
+import java.util.Map;
+import java.util.UUID;
+
+/**
+ * 명세 F-23 · F-24 · F-30 · F-33:
+ * 묶음 쓰기나 칸 단위 쓰기 도중 발생하는 회차 예외 저장, 반복 마스터 나누기,
+ * 시간표 겹침 검사를 처리한다. writeId는 칸 쓰기 이력(item_field_writes)에 남겨 되돌리기에 쓴다.
+ * 회차 날짜 · 적용 시작일 · 예외와 지운 회차 옮기기 · 짝 없는 예외 판정은 마스터 아이템의
+ * 시간대(items.time_zone, {@link com.bedrock.app.common.domain.ItemTimeZones})로 계산한다(기능 명세 v0.0.6 F-12 · F-23).
+ */
+public interface ScheduleMutationPort {
+    /** 같은 컬렉션 · 겹치는 기간의 시간표 마스터와 시간대가 겹치면 TIMETABLE_SLOT_OVERLAP으로 거절한다. */
+    void validateAndSaveTimetable(UUID userId, UUID itemId, UUID collectionId, ItemBatchWritePort.TimetableSpec timetable);
+
+    /**
+     * spec.rrule은 RecurrenceRule이 받는 꼴(n일마다 · 매주 · 매월 · 매년 같은 날짜)이어야 하고,
+     * 기준 날짜(시작, 없으면 마감)와 맞아야 한다. 아니면 WRITE_REJECTED_VALIDATION으로 거절한다.
+     */
+    void saveRecurrenceRule(UUID userId, UUID itemId, ItemBatchWritePort.RecurrenceSpec spec);
+
+    UUID applyOccurrenceException(UUID userId, ItemBatchWritePort.OccurrenceRef occurrence,
+            Map<String, Object> changedFields, boolean deleteOccurrence, UUID writeId);
+
+    /** 나누면서 짝을 잃은 회차 예외는 ConflictRegistryPort로 ORPHANED_OCCURRENCE 충돌을 등록한다. */
+    UUID splitAndModifySeries(UUID userId, UUID masterItemId, LocalDate effectiveFrom,
+            Map<String, Object> changedFields, boolean isTimetable, UUID writeId);
+}
+```
+
+반복 규칙 꼴과 회차 날짜 계산은 `common.domain.RecurrenceRule` 하나로 한다(기능 명세 v0.0.6 F-23). BE 3의 반복 저장 · 나누기 · 예외 옮기기, BE 2의 다음 회차로 넘기기, ICS 가져오기가 같은 규칙을 쓰려는 것이다.
+
+| 꼴                                                  | 뜻                                                                    |
+| --------------------------------------------------- | --------------------------------------------------------------------- |
+| `FREQ=DAILY[;INTERVAL=n]`                           | n일마다                                                               |
+| `FREQ=WEEKLY[;INTERVAL=n][;BYDAY=MO,WE,...]`        | 매주. BYDAY가 없으면 기준 날짜의 요일                                 |
+| `FREQ=MONTHLY[;INTERVAL=n][;BYMONTHDAY=d]`          | 매월 같은 날짜. 없으면 기준 날짜의 일. 앱은 BYMONTHDAY를 뺀 꼴을 쓴다 |
+| `FREQ=YEARLY[;INTERVAL=n][;BYMONTH=m;BYMONTHDAY=d]` | 매년 같은 날짜. 없으면 기준 날짜의 월 · 일. 앱은 둘을 뺀 꼴을 쓴다    |
+
+- 그 달에 없는 날은 건너뛰고 세지 않는다(RFC 5545 3.3.10). 매달 31일은 31일이 있는 달에만, 2월 29일은 윤년에만 회차가 난다.
+- 끝은 `RecurrenceSpec.untilDate`가 맡아서 UNTIL · COUNT는 받지 않는다. n번째 요일(`BYDAY=3TU`) · 말일(`BYMONTHDAY=-1`) · BYSETPOS · 여러 날짜는 MVP 밖이라 받지 않는다.
+- 명시한 BYDAY · BYMONTH · BYMONTHDAY는 기준 날짜와 맞아야 한다. 기준 날짜는 시작, 없으면 마감이고, 시각 값이면 아이템의 표준 시간대로 자른 날짜다.
+
+## 4.5 계정 · 워크스페이스 수명 연동 (`BE 2 · BE 3` 제공 → `BE 1` 호출)
+
+```java
+package com.bedrock.app.common.port;
+
+import java.util.UUID;
+
+/**
+ * 명세 F-01 · F-06 · F-15 · F-40 · F-46:
+ * 가입할 때 워크스페이스(MVP는 계정마다 하나) · 기본 컬렉션 · 기본 설정을 만들고,
+ * 탈퇴 즉시 또는 30일 유예 만료 때 그 계정의 데이터를 물리 삭제한다.
+ */
+public interface WorkspaceLifecyclePort {
+    /**
+     * @param timeZone 가입한 기기의 IANA 시간대(DeviceContextDto.timeZone). 기본 설정의 timeZone 처음 값이 된다.
+     *                 IANA 이름이 아니면({@link com.bedrock.app.common.domain.ItemTimeZones#isIanaZoneId}) 요청을 거절한다.
+     * @return 만든 워크스페이스 id
+     */
+    UUID initializeWorkspaceForNewUser(UUID userId, String timeZone);
+    void purgeAllWorkspaceDataForUser(UUID userId);
+}
+```
+
+---
+
+# 5. 서버 설정과 보안 · 무로그 필터 (`application.yml` · `common/config`)
+
+## 5.1 `src/main/resources/application.yml`
+
+VM 호스트의 Nginx 리버스 프록시 뒤에서 동작하므로 `server.forward-headers-strategy: native`를 켜고, 로컬과 클라우드의 DB 스키마를 일치시키기 위해 **Flyway(`spring.flyway`)**와 **JPA 스키마 검증(`spring.jpa.hibernate.ddl-auto: validate`)**을 함께 활성화한다.
+
+```yaml
+spring:
+  application:
+    name: bedrock-api
+  docker:
+    compose:
+      enabled: ${DOCKER_COMPOSE_ENABLED:false}
+      file: docker-compose.yaml
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${POSTGRES_DB:${DB_NAME:bedrock}}}
+    username: ${DB_USERNAME:${DB_USER:bedrock}}
+    password: ${DB_PASSWORD:bedrock}
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 1
+    out-of-order: true
+    validate-on-migrate: true
+  jpa:
+    open-in-view: false
+    show-sql: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc.time_zone: UTC
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  session:
+    timeout: 30m
+    data:
+      redis:
+        namespace: bedrock:session:v2
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+      mail.smtp.connectiontimeout: 5000
+      mail.smtp.timeout: 5000
+      mail.smtp.writetimeout: 5000
+  mvc:
+    log-request-details: false
+  web:
+    # Boot 4는 server.error.*를 더 읽지 않는다(spring-boot-web-server 메타데이터: deprecation level error).
+    error:
+      include-message: never
+      include-binding-errors: never
+      include-stacktrace: never
+
+server:
+  port: ${PORT:8080}
+  forward-headers-strategy: native
+  servlet:
+    session:
+      timeout: 30m
+      cookie:
+        name: BEDROCK_SESSION
+        path: /
+        http-only: true
+        secure: ${COOKIE_SECURE:true}
+        same-site: lax
+
+bedrock:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
+  security:
+    argon2:
+      memory-kb: 19456
+      iterations: 2
+      parallelism: 1
+  kms:
+    key-id: ${KMS_KEY_ID:local-dev-kms-key}
+  mail:
+    from-address: ${MAIL_FROM:no-reply@example.com}
+    hourly-global-limit: ${MAIL_HOURLY_LIMIT:5000}
+  ai:
+    timeout-ms: ${AI_TIMEOUT_MS:15000}
+    daily-user-limit: ${AI_DAILY_USER_LIMIT:100}
+  ocr:
+    timeout-ms: ${OCR_TIMEOUT_MS:20000}
+    daily-user-limit: ${OCR_DAILY_USER_LIMIT:20}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+
+# API 문서는 기본으로 닫는다. 로컬(application-local.yml)과 스모크 픽스처만 연다.
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:false}
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:false}
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: method
+    display-request-duration: true
+  packages-to-scan: com.bedrock.app
+
+# 예외 SQL/바인딩 값, 헤더, 본문을 프레임워크 로그로 노출하지 않는다.
+logging:
+  level:
+    org.hibernate.SQL: OFF
+    org.hibernate.orm.jdbc.bind: OFF
+    org.hibernate.engine.jdbc.spi.SqlExceptionHelper: OFF
+    org.hibernate.orm.jdbc.error: OFF
+    org.springframework.web: WARN
+    org.springframework.security: WARN
+```
+
+## 5.2 현재 로그인 사용자 주입과 보안 · 무로그 규칙 (`common/auth`, `common/filter`)
+
+```java
+package com.bedrock.app.common.auth;
+
+import java.io.Serializable;
+import java.util.UUID;
+
+/**
+ * Redis 세션에 저장되는 인증 주체.
+ * 모든 컨트롤러는 @CurrentUser SessionPrincipal 로 현재 사용자를 꺼낸다.
+ */
+public record SessionPrincipal(
+        UUID userId,
+        UUID deviceId,
+        String platform,     // IOS | IPADOS | WEB
+        boolean rememberMe
+) implements Serializable {
+    public static final String SESSION_ATTRIBUTE = "SESSION_PRINCIPAL";
+
+    public SessionPrincipal {
+        java.util.Objects.requireNonNull(userId, "userId");
+        java.util.Objects.requireNonNull(deviceId, "deviceId");
+        if (!java.util.Set.of("IOS", "IPADOS", "WEB").contains(platform)) {
+            throw new IllegalArgumentException("지원하지 않는 플랫폼입니다.");
+        }
+    }
+}
+```
+
+- **무로그 원칙(명세 4.3):** 요청/응답 본문(사용자가 적은 글 · 비밀번호 · 메일 코드 · "내가 아니다" 토큰 · 구글/Apple 토큰 · AI 입출력 · 캡처 이미지)과 세션 쿠키 값은 절대 로그에 찍지 않는다.
+- **응답 캐시 방지(명세 4.4):** 모든 API 응답 헤더에 `Cache-Control: no-store`를 기본으로 넣는다.
+- **웹 탭 계정 검증(명세 F-44):** 요청 헤더 `X-Bedrock-Account-Id`가 있으면 세션의 `userId`와 견주어 다르면 `Be2SyncItemErrorCode.ACCOUNT_MISMATCH`로 거절한다.
+
+## 5.3 엔드포인트별 접근 로그 필터 (`common/filter/EndpointAccessLogFilter.java`)
+
+각 엔드포인트 호출마다 클라이언트 IP · HTTP 메서드 · 라우트 · 상태 코드 · 처리 시간(ms) · 인증된 `userId`(있는 경우)를 출력 및 파일로 보관한다.
+
+- **IP:** Tomcat의 forwarded-header 처리(`server.forward-headers-strategy: native`)가 믿은 주소를 쓴다. 요청이 루프백 프록시(호스트 Nginx)에서 왔을 때만 전달 헤더를 더 읽는다. 호스트 Nginx는 외부 클라이언트의 전달 헤더를 자기 값으로 덮어써야 한다. 외부가 보낸 `X-Forwarded-For`를 그대로 믿으면 IP를 위조할 수 있다.
+- **경로:** 실제 경로가 아니라 `/api/items/{id}` 같은 매핑 템플릿만 기록한다. 경로 안의 토큰을 남기지 않으려는 것이다. MVC에 닿기 전에 거절되었거나 매핑이 없는 요청은 `[unmapped]`다.
+- 본문 · 쿼리 · 쿠키 · 토큰 · 예외 메시지는 기록하지 않고, 응답에 `Cache-Control: no-store`를 넣는다.
+
+```java
+package com.bedrock.app.common.filter;
+
+import com.bedrock.app.common.auth.SessionPrincipal;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.core.annotation.Order;
+import org.springframework.session.web.http.SessionRepositoryFilter;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.servlet.HandlerMapping;
+
+import java.io.IOException;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+
+@Component
+@Order(SessionRepositoryFilter.DEFAULT_ORDER + 1)
+public class EndpointAccessLogFilter extends OncePerRequestFilter {
+    private static final Logger ACCESS_LOG = LoggerFactory.getLogger("ACCESS_LOGGER");
+    private static final Set<String> METHODS = Set.of("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS");
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
+            FilterChain chain) throws ServletException, IOException {
+        long started = System.nanoTime();
+        int status = 500;
+        response.setHeader("Cache-Control", "no-store");
+        try {
+            chain.doFilter(request, response);
+            status = response.getStatus();
+        } finally {
+            // 라우트 템플릿만 기록하여 경로에 담긴 토큰과 ;jsessionid도 배제한다.
+            Object route = request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
+            String endpoint = route == null ? "[unmapped]" : route.toString();
+            String method = METHODS.contains(request.getMethod()) ? request.getMethod() : "OTHER";
+            ACCESS_LOG.info("method={} uri={} status={} ip={} userId={} elapsedMs={}", method,
+                    endpoint, status, clientIp(request), userId(request),
+                    TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
+        }
+    }
+
+    private String clientIp(HttpServletRequest request) {
+        // native RemoteIpValve가 신뢰하는 프록시의 X-Forwarded-For를 먼저 반영한다.
+        String remote = request.getRemoteAddr();
+        if ("127.0.0.1".equals(remote) || "::1".equals(remote)) {
+            String forwarded = request.getHeader("X-Forwarded-For");
+            String realIp = request.getHeader("X-Real-IP");
+            String candidate = forwarded != null ? forwarded.split(",", 2)[0].trim() : realIp;
+            if (isIpLiteral(candidate)) {
+                return candidate;
+            }
+        }
+        return isIpLiteral(remote) ? remote : "unknown";
+    }
+
+    private boolean isIpLiteral(String value) {
+        return value != null && value.length() <= 45 && value.matches("[0-9a-fA-F:.]+");
+    }
+
+    private String userId(HttpServletRequest request) {
+        try {
+            var session = request.getSession(false);
+            if (session != null && session.getAttribute(SessionPrincipal.SESSION_ATTRIBUTE)
+                    instanceof SessionPrincipal principal) {
+                return principal.userId().toString();
+            }
+        } catch (IllegalStateException ignored) {
+            // 로그아웃으로 이미 무효화된 세션은 익명으로 기록한다.
+        }
+        return "anonymous";
+    }
+}
+```
+
+## 5.4 20MB 단위 로그 압축 · 롤링 설정 (`src/main/resources/logback-spring.xml`)
+
+로그를 콘솔에 출력함과 동시에 `LOG_DIR`(기본 `./logs`, 배포 Compose는 `/app/logs`) 아래에 파일로 보관하며, **파일 하나의 크기가 20MB에 닿을 때마다 `.gz`로 자동 압축 및 분리 보관**을 반복한다.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <property name="LOG_DIR" value="${LOG_DIR:-./logs}" />
+    <property name="LOG_PATTERN" value="%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX,UTC} [%thread] %-5level %logger{36} - %msg%n" />
+
+    <!-- 1. 표준 콘솔 출력 (docker logs 조회용) -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+        </encoder>
+    </appender>
+
+    <!-- 2. 엔드포인트 접근 로그 파일 (20MB 단위로 .gz 압축 및 보관 반복) -->
+    <appender name="ACCESS_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/access.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/archive/access-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>20MB</maxFileSize>
+            <maxHistory>365</maxHistory>
+            <totalSizeCap>10GB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+        </encoder>
+    </appender>
+
+    <!-- 3. 애플리케이션 일반/에러 로그 파일 (20MB 단위로 .gz 압축 및 보관 반복) -->
+    <appender name="APP_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/application.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/archive/application-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>20MB</maxFileSize>
+            <maxHistory>365</maxHistory>
+            <totalSizeCap>10GB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+        </encoder>
+    </appender>
+
+    <!-- 엔드포인트별 접근 로거 (콘솔 + access.log 동시 출력 및 보관) -->
+    <logger name="ACCESS_LOGGER" level="INFO" additivity="false">
+        <appender-ref ref="CONSOLE" />
+        <appender-ref ref="ACCESS_FILE" />
+    </logger>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE" />
+        <appender-ref ref="APP_FILE" />
+    </root>
+</configuration>
+```
+
+---
+
+# 6. 배포 및 Docker 정형화 공통 파일
+
+## 6.1 정형화 요구사항 반영 규칙
+
+1. **타겟 환경과 라우팅:** Ubuntu 24.04 LTS (`linux/amd64`) VM 위에서 돌아가며, 외부 트래픽은 VM 호스트의 Nginx가 컨테이너 로컬 포트(`127.0.0.1:${BE_HOST_PORT:-8080}->8080`)로 포워딩한다.
+2. **소스 코드 미포함과 바이트코드 난독화:** 멀티스테이지 `Dockerfile`을 써서 빌드 단계에서 Java 소스를 바이트코드로 컴파일한 뒤 **ProGuard**로 난독화하고, 최종 런타임 이미지(JRE 전용)에는 `.java` 평문 소스를 일절 남기지 않고 난독화된 바이트코드(`.jar`)만 담는다.
+3. **이미지 이름과 Buildx 자동 재시작 방지:** 이미지 이름은 `eagleindesert/<디렉토리 이름>` 형식을 기본으로 쓰고, `buildx` 빌더 컨테이너는 호스트 부팅 시 자동 재시작되지 않도록 `restart=no`로 묶는다.
+4. **3개 파일 독립 배포:** 배포 서버(VM)에는 프로젝트 루트 기준으로 `docker-compose-deployment.yaml`, `.env`, `start.sh` 세 파일만 한 디렉토리에 복사해 `./start.sh`를 실행하면 정상 동작한다.
+5. **CLI 호환성과 버전 지정:** `./start.sh`로 실행하든 터미널에서 직접 `docker compose -f docker-compose-deployment.yaml ...` 명령을 실행하든 똑같이 동작하며, `./start.sh <버전>`을 넣으면 해당 버전을 `pull` 받아 `up -d`한다.
+
+## 6.2 `Dockerfile` (멀티스테이지 빌드 · 바이트코드 난독화 · 평문 소스 제거)
+
+```docker
+# syntax=docker/dockerfile:1
+FROM eclipse-temurin:21-jdk-noble AS builder
+WORKDIR /workspace
+
+COPY gradlew settings.gradle build.gradle proguard.pro ./
+COPY gradle ./gradle
+RUN chmod +x ./gradlew
+COPY src ./src
+RUN ./gradlew bootJarObfuscate --no-daemon -x test
+
+FROM eclipse-temurin:21-jre-noble
+WORKDIR /app
+RUN groupadd -r appgroup && useradd -r -g appgroup appuser \
+    && mkdir -p /app/logs/archive && chown -R appuser:appgroup /app/logs
+COPY --from=builder /workspace/build/libs/app-obfuscated.jar /app/app.jar
+USER appuser
+EXPOSE 8080
+ENTRYPOINT ["java", "-XX:+UseContainerSupport", "-XX:MaxRAMPercentage=75.0", "-jar", "/app/app.jar"]
+```
+
+## 6.3 `proguard.pro` (Spring Boot 바이트코드 난독화 설정)
+
+비즈니스 로직 클래스·메서드·필드 이름은 난독화하고, Spring DI · JPA 엔티티 · Jackson 직렬화 경계만 유지한다.
+
+```
+# 이름 난독화에 집중하고 Spring의 런타임 반사 접근에 필요한 코드는 제거하지 않는다.
+-dontshrink
+-dontoptimize
+-dontwarn
+-dontnote
+-target 21
+-useuniqueclassmembernames
+-keeppackagenames com.bedrock.app.**
+-keepdirectories
+-renamesourcefileattribute SourceFile
+-keepattributes Exceptions,InnerClasses,Signature,EnclosingMethod,*Annotation*,MethodParameters,Record
+
+# Boot 진입점, 설정과 메타 애너테이션, HTTP 매핑 경계.
+-keep @org.springframework.boot.autoconfigure.SpringBootApplication class * { *; }
+-keep @org.springframework.context.annotation.Configuration class * { *; }
+-keep @org.springframework.boot.autoconfigure.AutoConfiguration class * { *; }
+-keep @org.springframework.web.bind.annotation.RestController class * { *; }
+-keep @org.springframework.web.bind.annotation.RestControllerAdvice class * { *; }
+-keep @interface com.bedrock.app.** { *; }
+
+# DB 이름, 파생 쿼리, JSON 속성, Redis 세션의 직렬화 이름은 안정적으로 유지한다.
+-keep @jakarta.persistence.Entity class * { *; }
+-keep @jakarta.persistence.Embeddable class * { *; }
+-keep @jakarta.persistence.MappedSuperclass class * { *; }
+-keep interface * extends org.springframework.data.repository.Repository { *; }
+-keep class com.bedrock.app.**.dto.** { *; }
+-keep class * extends java.lang.Record { *; }
+-keep class com.bedrock.app.common.auth.SessionPrincipal { *; }
+# 설정 바인딩은 setter · 생성자 이름으로 한다. 이름이 바뀌면 배포 이미지에서만 값이 조용히 빈다.
+-keep @org.springframework.boot.context.properties.ConfigurationProperties class * { *; }
+-keep interface com.bedrock.app.common.port.** { *; }
+-keep enum com.bedrock.app.** { *; }
+
+# 명시적 이름이 없는 Component의 빈 이름 충돌을 막는다. Service는 이름을 명시한다.
+-keepnames @org.springframework.stereotype.Component class *
+-keepclassmembers class * {
+    @org.springframework.beans.factory.annotation.Autowired *;
+    @org.springframework.beans.factory.annotation.Value *;
+    @jakarta.annotation.PostConstruct *;
+    @jakarta.annotation.PreDestroy *;
+    @org.springframework.context.annotation.Bean *;
+}
+```
+
+위 블록은 리포의 `proguard.pro` 그대로다. 다음 세 규칙을 꼭 지킨다.
+
+- **JSON 요청 · 응답 클래스는 record이거나 `com.bedrock.app.**.dto` 패키지 안에 둔다.\*\* 그래야 배포 이미지에서 속성 이름이 산다. 일반 클래스의 getter는 이름이 바뀌어 Jackson이 속성으로 보지 못하고, 테스트(난독화 전 클래스)로는 잡히지 않는다.
+- **`@Service`에는 빈 이름을 적는다**(`@Service("itemWriteService")`). 이름이 없으면 난독화된 클래스 이름(`a` 등)이 빈 이름이 되어 서로 다른 패키지의 서비스가 부딪쳐 기동이 멈춘다.
+- **`@ConfigurationProperties` 클래스는 통째로 지킨다**(`-keep @org.springframework.boot.context.properties.ConfigurationProperties class * { *; }`). setter 이름이 바뀌면 배포 이미지에서만 설정값이 조용히 빈다.
+
+설정 키는 `ConfigurationKeysTest`가 Boot 메타데이터와 대조한다. 없는 키와 error 단계로 폐기된 키(예: `server.error.*`, `spring.session.redis.*`)는 실패다. API 문서(Swagger)는 기본 닫힘이고 로컬 프로필과 스모크 픽스처만 연다.
+
+## 6.4 `/scripts/build-push.sh` (`eagleindesert/<디렉토리 이름>` 빌드 및 Buildx 부팅 자동 재시작 방지)
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DIR_NAME="$(basename "${PROJECT_ROOT}")"
+IMAGE_NAME="${IMAGE_NAME:-eagleindesert/${DIR_NAME}}"
+IMAGE_TAG="${1:-latest}"
+BUILDER_NAME="bedrock-x86-builder"
+BUILDER_CONTAINER="buildx_buildkit_${BUILDER_NAME}0"
+
+if (( $# > 1 )) || [[ ! "${IMAGE_TAG}" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]]; then
+    printf 'Usage: %s [valid-image-tag]\n' "$0" >&2
+    exit 2
+fi
+
+disable_builder_restart() {
+    if docker container inspect "${BUILDER_CONTAINER}" >/dev/null 2>&1; then
+        docker update --restart=no "${BUILDER_CONTAINER}" >/dev/null
+    fi
+}
+
+trap disable_builder_restart EXIT
+if ! docker buildx inspect "${BUILDER_NAME}" >/dev/null 2>&1; then
+    docker buildx create --name "${BUILDER_NAME}" --driver docker-container --use
+else
+    docker buildx use "${BUILDER_NAME}"
+fi
+
+# 빌드 실패 때도 EXIT trap으로 새 빌더의 자동 재시작을 해제한다.
+docker buildx inspect "${BUILDER_NAME}" --bootstrap >/dev/null
+disable_builder_restart
+docker buildx build \
+    --builder "${BUILDER_NAME}" \
+    --platform linux/amd64 \
+    -t "${IMAGE_NAME}:${IMAGE_TAG}" \
+    --push \
+    "${PROJECT_ROOT}"
+```
+
+## 6.5 `docker-compose-deployment.yaml` (Docker Hub 이미지 기반 배포)
+
+배포 디렉토리(프로젝트 루트)에 `docker-compose-deployment.yaml`, `.env`, `start.sh`만 복사해 실행하며, 일반 CLI에서 `docker compose -f docker-compose-deployment.yaml ...`을 직접 실행해도 `.env`를 자동으로 읽어 동일하게 동작한다.
+
+API 문서(Swagger UI · `/v3/api-docs`)는 `SWAGGER_ENABLED`로 켜고 끈다. 기본은 닫힘(`false`)이고, 운영에서는 열지 않는다. 열면 인증 없이 공개되므로 켜려면 `.env`에 `SWAGGER_ENABLED=true`를 명시한다.
+
+```yaml
+name: bedrock
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-bedrock}
+      POSTGRES_USER: ${DB_USERNAME:-bedrock}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      TZ: UTC
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command:
+      [redis-server, --requirepass, "${REDIS_PASSWORD}", --appendonly, "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  be:
+    image: eagleindesert/${BE_IMAGE_REPO:-bedrock-app-backend}:${IMAGE_TAG:-latest}
+    platform: linux/amd64
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${BE_HOST_PORT:-8080}:8080"
+    env_file:
+      - .env
+    volumes:
+      - be_logs:/app/logs
+    environment:
+      PORT: 8080
+      LOG_DIR: /app/logs
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-bedrock}
+      DB_USERNAME: ${DB_USERNAME:-bedrock}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
+
+volumes:
+  postgres_data:
+  redis_data:
+  be_logs:
+```
+
+## 6.6 `.env.example` (배포 서버에서 `.env`로 복사해 사용)
+
+```
+# Docker Hub 이미지 설정 (eagleindesert/<디렉토리 이름>)
+BE_IMAGE_REPO=bedrock-app-backend
+IMAGE_TAG=latest
+
+# VM 호스트 Nginx 포워딩 포트 (127.0.0.1:BE_HOST_PORT -> 컨테이너 8080)
+BE_HOST_PORT=8080
+
+# PostgreSQL & Redis
+POSTGRES_DB=bedrock
+DB_USERNAME=bedrock
+DB_PASSWORD=change-me-db-password
+REDIS_PASSWORD=change-me-redis-password
+
+# 보안 · 쿠키 · CORS · KMS · 메일 · AI
+COOKIE_SECURE=true
+CORS_ALLOWED_ORIGINS=https://app.example.com
+KMS_KEY_ID=prod-kms-key-id
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=apikey
+SMTP_PASSWORD=change-me-smtp-password
+MAIL_FROM=no-reply@example.com
+
+# API 문서(Swagger). 기본 닫힘. 운영에서는 false로 둔다
+SWAGGER_ENABLED=false
+```
+
+## 6.7 `start.sh` (프로젝트 루트 배포 실행 스크립트)
+
+- 프로젝트 루트(`docker-compose-deployment.yaml`과 같은 위치)에 둔다.
+- 파라미터 없이 `./start.sh`를 실행하면 `docker compose -f docker-compose-deployment.yaml up -d`와 정확히 같게 동작한다.
+- 버전 파라미터를 넣어 `./start.sh 1.0.2`처럼 실행하면 `.env`의 `IMAGE_TAG`를 해당 버전으로 맞추고 `docker compose -f docker-compose-deployment.yaml pull` 뒤 `up -d`를 실행한다(`.env`에 반영되므로 이후 터미널에서 직접 `docker compose -f docker-compose-deployment.yaml ...` CLI를 쳐도 같은 버전으로 동작한다).
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "${SCRIPT_DIR}"
+COMPOSE_FILE="docker-compose-deployment.yaml"
+
+if (( $# > 1 )); then
+    printf 'Usage: %s [image-tag]\n' "$0" >&2
+    exit 2
+fi
+
+if (( $# == 1 )); then
+    TARGET_VERSION="$1"
+    if [[ ! "${TARGET_VERSION}" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]]; then
+        printf 'Invalid Docker image tag.\n' >&2
+        exit 2
+    fi
+    if [[ ! -f .env ]]; then
+        printf 'Create .env from .env.example before deployment.\n' >&2
+        exit 1
+    fi
+
+    # .env를 실행하지 않고 태그 줄만 교체한다. 중복 키도 하나로 정리한다.
+    ENV_TEMP="$(mktemp .env.tag.XXXXXX)"
+    trap 'rm -f -- "${ENV_TEMP}"' EXIT
+    awk -v tag="${TARGET_VERSION}" '
+        /^[[:space:]]*(export[[:space:]]+)?IMAGE_TAG[[:space:]]*=/ {
+            if (!written++) print "IMAGE_TAG=" tag
+            next
+        }
+        { print }
+        END { if (!written) print "IMAGE_TAG=" tag }
+    ' .env > "${ENV_TEMP}"
+    chmod --reference=.env "${ENV_TEMP}"
+    mv -- "${ENV_TEMP}" .env
+    export IMAGE_TAG="${TARGET_VERSION}"
+    docker compose -f "${COMPOSE_FILE}" pull
+fi
+
+docker compose -f "${COMPOSE_FILE}" up -d
+```
