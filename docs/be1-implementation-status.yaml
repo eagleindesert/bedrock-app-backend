@@ -1,0 +1,312 @@
+# BE1 구현·연동 현황. 운영 설정 파일이 아니며 비밀값을 포함하지 않는다.
+updated: 2026-11-15
+owner: BE1
+overall_status: integration_and_runtime_verification_pending
+references:
+  - docs/requirements.md
+  - docs/be-works-division.md
+  - docs/fe-be-works-division.md
+  - docs/api-spec.md
+  - docs/be-common-files.md
+constraints:
+  - 사용자의 결정에 따라 common.port·공통 설정·배포 파일을 변경하지 않았다.
+  - AGENTS.md가 허용하는 BE1 담당 에러 Enum은 확장했다.
+  - 타 담당 테이블에 직접 접근하거나 미구현 포트의 성공을 가장하지 않는다.
+  - 외부 서비스와 통합 테스트까지 검증한 전체 기능 완료 상태는 아니다.
+
+features:
+  F-01:
+    implemented: 가입 요청, 메일 확인 후 비밀번호 검사·Argon2id 해시, 계정 생성, 재가입·탈퇴 유예 분기
+    entry: src/main/java/com/bedrock/app/auth/service/EmailAuthentication.java
+    dependencies: [workspace_lifecycle, vault, smtp, password_breach_lookup]
+  F-02:
+    implemented: 이메일·Google·Apple 로그인, 서명·nonce·state 검증, 이메일 연결, 연속 실패 잠금, Redis 세션
+    entry: src/main/java/com/bedrock/app/auth/service/OAuthAuthentication.java
+    details:
+      - 일반 웹은 실제 사용자 조작 헤더가 있는 요청만 30분 무활동 시간을 갱신한다.
+      - 유지 로그인·네이티브 세션은 30일 미사용 시 끝난다.
+      - OAuth nonce/state는 Redis에서 한 번만 소비하며 인증 요청은 세션 저장 완료까지 직렬화한다.
+    dependencies: [oauth_registration, redis, smtp, vault, workspace_lifecycle]
+  F-03:
+    implemented: 계정 존재를 드러내지 않는 메일 요청, 코드 검증, 비밀번호 재설정, 전 기기 종료, 변경 알림
+    entry: src/main/java/com/bedrock/app/auth/service/EmailAuthentication.java
+    dependencies: [smtp, redis, password_breach_lookup]
+  F-04:
+    implemented: 6자리·10분·5회 코드, 작업·세션 바인딩 HMAC, 60초 재발송, 발송 제한, 비동기 SMTP·재시도·반송 차단, 선택 가능한 SendGrid 서명 이벤트 수신
+    entry: src/main/java/com/bedrock/app/mail/service/MailCodeService.java
+    details:
+      - SendGrid는 원본 HTTP 바이트의 ECDSA 서명·시간을 검증하고 전달 완료와 영구 반송만 처리한다.
+      - 이벤트 ID·내용은 HMAC으로 35일 보관한다. 중복 반송·집계와 같은 ID의 다른 내용은 거부한다.
+      - 이벤트 수신과 주소 차단은 같은 DB 트랜잭션이다. 반송률 집계는 커밋 이후에만 반영한다.
+    limitations:
+      - 재시도 큐는 메모리 기반이다. 프로세스 재시작 시 대기 메일은 다시 받기로 복구한다.
+      - SMTP 제공자는 미정이다. SendGrid를 선택하면 공개키와 webhook을 설정하고 실제 반송을 검증해야 한다.
+      - 다른 제공자를 선택하면 그 제공자의 서명 검증·이벤트 변환기를 추가해야 한다.
+      - Redis 반송률은 최선 노력 집계다. DB 커밋 직후 장애가 나면 집계가 누락될 수 있으나 영구 차단은 유지된다.
+    dependencies: [smtp, redis, mail_secrets]
+  F-05:
+    implemented: 로그아웃, 기기 목록·선택/다른 기기 종료, 새 기기·제공자 알림, 7일·1회 내가 아니다 확인 화면
+    entry: src/main/java/com/bedrock/app/auth/api/NotMePageController.java
+    details:
+      - 확인 화면 GET은 계정 상태를 바꾸지 않는다.
+      - 링크 토큰은 URL fragment로 받고 주소창에서 제거한다. 명시적 확인 POST만 연결·세션을 해제한다.
+    dependencies: [smtp, redis, public_origin]
+  F-06:
+    implemented: 30일 삭제 유예, 메일 증명 후 복구/새로 시작, Apple 토큰 해지, 물리 삭제 재시도, 외부 키 정리
+    entry: src/main/java/com/bedrock/app/auth/service/AccountLifecycle.java
+    details:
+      - 워크스페이스 삭제 후 PURGING을 확정하고 데이터 키를 파기하여 키 없는 계정의 복구를 막는다.
+      - 계정 생성 롤백 시 외부에 남은 데이터 키는 별도 정리 기록으로 회수한다.
+      - 복구와 비밀번호 변경·로그인·제공자 연결의 DB 변경은 같은 트랜잭션에서 수행한다.
+      - OAuth 새로 시작의 후속 연결이 실패하면 원래 메일 증명을 유지하고 같은 새 계정 ID로 재시도한다.
+      - 지연된 Apple 해지 작업은 계정 상태를 잠금 안에서 다시 확인하며 복구된 계정의 새 토큰을 해지하지 않는다.
+    dependencies: [workspace_lifecycle, vault, oauth_registration]
+  profile:
+    implemented: 세션 조회 응답의 내 프로필, 이름 변경·탈퇴 API
+    entry: src/main/java/com/bedrock/app/auth/api/UserController.java
+  encryption:
+    implemented: UserCryptoPort, 사용자별 AES-256-GCM, 사용자·버전 AAD, Vault Transit·KV v2 데이터 키 생성/로드/파기
+    entry: src/main/java/com/bedrock/app/crypto/service/EnvelopeUserCrypto.java
+    details:
+      - 데이터 키 원문·래핑 키를 애플리케이션 DB에 저장하지 않는다.
+      - 외부 키 저장소에 삭제 표식을 보존해 파기된 사용자 키의 재생성을 막는다.
+    dependencies: [vault, backup_and_operator_policy]
+  F-43:
+    implemented: 문장·지침·최소 후보 중계, 엄격한 JSON 구조·대상·시간 검증, 삭제 범위 확인, 시간·사용량 제한
+    entry: src/main/java/com/bedrock/app/ai/service/AiRequestService.java
+    runtime_status: FEATURE_NOT_READY
+    details:
+      - 제공자의 strict 설정 외에도 실제 JSON의 필수 필드·타입·알 수 없는 필드·null을 서버에서 검사한다.
+      - 정수 넘침, 잘못된 날짜, 중복 시간대 ID를 거부하고 시간표의 종료일 포함·끝 없음 규칙을 지킨다.
+    dependencies: [ai_workspace_read, model_credentials]
+  F-47:
+    implemented: 최초 맥락 유지, 질문·답 암호화, 답 ID 재전송 처리, revision 경쟁 검사, 기존 완료 결과 조회
+    entry: src/main/java/com/bedrock/app/ai/service/AiRequestService.java
+    details:
+      - 늦은 답에서 proposedFields와 dateInstructions의 과거 날짜를 확인하고 명시적 유지 답을 받는다.
+      - 서버 확인 질문도 예·취소 등 자유 입력을 처리한다. 모순된 선택·글을 승인으로 받지 않는다.
+    dependencies: [ai_workspace_read, ai_batch_completion, item_batch]
+  F-50:
+    implemented: 암호화 저장, 최신순 커서 조회, 쓰기 ID·버전 검사, 단건/전체 영구 삭제, 삭제 ID 보존
+    entry: src/main/java/com/bedrock/app/conversation/service/ConversationService.java
+    details:
+      - 삭제 시 대화와 쓰기 응답 스냅샷, 연결된 AI 요청의 글을 비운다.
+      - V10의 기존 트리거로 CONVERSATION 동기화 삭제 표식을 생성한다.
+      - 한 AI 요청은 한 대화에 연결하고 SAVED 결과의 실제 완료 묶음을 확인한다.
+      - 가입 포트가 반환한 ID를 users.home_workspace_id에 보관하고 V9의 워크스페이스 잠금으로 쓰기·삭제 순서를 맞춘다.
+    dependencies: [vault, item_batch, conversation_undo, shared_write_id_registry, sync_delivery]
+  F-34:
+    implemented: 메모리 내 단일 multipart 캡처 처리, 형식·10MB 제한, 시간표 후보 구조 검사, 시간·호출 한도
+    entry: src/main/java/com/bedrock/app/ocr/service/TimetableRecognition.java
+    runtime_status: FEATURE_NOT_READY
+    dependencies: [ai_workspace_read, model_credentials, heic_layout_credentials]
+
+integration_gaps:
+  ai_workspace_read:
+    owner: 공통 계약 합의 후 BE2·BE3 제공, BE1 사용
+    missing:
+      - 서버에 저장한 AI·OCR 동의 상태 조회
+      - 후보·선택 대상·정리 대기 아이템·컬렉션의 소유권 및 삭제 상태 조회
+    current: AiWorkspaceAccess의 세 메서드는 모두 503 FEATURE_NOT_READY로 실패한다.
+    impact: AI 최초 해석·되묻기·OCR은 실제 외부 호출 전에 중단된다. 클라이언트의 동의를 대신 신뢰하지 않는다.
+  ai_batch_completion:
+    owner: BE1 완료 계약 제공, BE2 묶음 쓰기에서 호출
+    prepared_methods: [AiRequestService.lockReadyRequest, AiRequestService.markCommitted]
+    missing: common.port 인터페이스와 BE2의 실제 호출
+    required_behavior:
+      - BE2 묶음 트랜잭션에서 요청 소유권·revision을 잠그고 검사한다.
+      - 이미 완료된 요청이면 기존 batchId를 돌려주고 새 쓰기를 실행하지 않는다.
+      - 아이템 쓰기와 AI 완료 표시는 같은 DB 트랜잭션에서 커밋하거나 롤백한다.
+    impact: 현재는 READY를 실제 저장 완료로 바꾸는 연결과 기기 간 한 번만 저장을 보장하는 전체 경로가 없다.
+  conversation_undo:
+    owner: BE1 삭제 상태 제공, BE2 되돌리기에서 검사
+    prepared_methods: [AiRequestService.wasConversationDeleted, ConversationService.wasDeleted]
+    missing: common.port 조회 계약 및 BE2 undo 차단 연동
+    impact: 대화 삭제와 늦은 PUT 차단은 구현했다. 관련 묶음의 되돌리기 차단은 아직 연결되지 않았다.
+  workspace_lifecycle:
+    owner: BE2·BE3
+    existing_contract: WorkspaceLifecyclePort
+    calls: [initializeWorkspaceForNewUser, purgeAllWorkspaceDataForUser]
+    impact: 현재 기본 Stub이면 가입·새로 시작·워크스페이스 물리 삭제는 503으로 실패한다.
+    existing_accounts: V103 이전 계정의 home_workspace_id는 비어 있다. BE2·BE3가 확인한 ID를 연결하기 전에는 대화 쓰기·물리 삭제가 503으로 실패한다.
+  item_batch:
+    owner: BE2
+    existing_contract: ItemBatchWritePort
+    impact: 실제 묶음 저장·완료 조회 구현이 필요하다. Stub이면 SAVED 대화 등록·완료 결과 조회를 성공시키지 않는다.
+  sync_delivery:
+    owner: BE2
+    current: 기존 DB 트리거를 통한 삭제 표식 생성
+    remaining: 실제 변경분 API를 통한 다른 기기 전달 검증
+  shared_write_id_registry:
+    owner: 공통 계약 합의 후 BE2 제공, BE1 사용
+    current: conversation_writes에서 대화 PUT·DELETE·DELETE_ALL의 사용자별 writeId를 검사한다.
+    missing: BE2의 write_requests에 접근할 공통 멱등 기록 계약
+    impact: 대화 자체의 재전송은 처리하지만 아이템 등 다른 기능과 같은 writeId를 재사용한 경우의 통합 충돌 검사는 미연동이다.
+  beta_item_creation:
+    owner: BE2 저장 이벤트 제공, BE1 집계
+    prepared_method: BetaMetrics.recordCreatedItems
+    missing: 커밋한 아이템 만들기 수 전달 계약
+    required_behavior:
+      - 기존 워크스페이스 잠금을 잡은 같은 아이템 쓰기 트랜잭션에서 userId·writeId·만들기 개수를 전달한다.
+      - 사용자 작업으로 새로 만든 논리 아이템만 센다. 복구·반복 가상 회차·기존 항목 수정은 제외한다.
+      - 같은 writeId와 개수는 한 번만 기록하고 다른 개수로 다시 호출하면 충돌로 거부한다.
+    current: HMAC 쓰기별 SQL 기록·롤백·중복 방지·일일 합계·활성 사용자당 평균 구현. 실제 생산자 호출은 없다.
+    impact: 생성 생산자 연동 설정을 켜기 전에는 생성 지표를 0 대신 NaN으로 표시한다.
+
+engine_and_limits:
+  ai:
+    engine: OpenAI Responses / gpt-4.1-mini
+    behavior: strict JSON Schema, store=false, 스트리밍 없음, 후보 본문과 쓰기 버전은 모델에 보내지 않음
+    timeout_ms: 15000
+    calls_per_user_rolling_24h: 100
+    calls_per_user_minute: 10
+  ocr:
+    png_jpeg_webp: OpenAI 이미지 입력과 구조화 응답
+    heic: Azure Document Intelligence prebuilt-layout / 2024-11-30 후 OpenAI 텍스트 구조화
+    timeout_ms: 20000
+    max_upload_bytes: 10485760
+    calls_per_user_rolling_24h: 20
+    calls_per_user_minute: 3
+    retention:
+      - 서버 이미지 원문은 메모리에서만 취급하고 처리 후 바이트 버퍼를 지운다.
+      - Azure 결과는 즉시 삭제하고 실패한 삭제는 원문 없는 operation ID만 Redis에 두어 재시도한다.
+      - 제공자의 자체 보관·학습 제외 정책은 운영 계정에서 별도로 확인해야 한다.
+  concurrency:
+    per_process: 32
+    per_user_per_engine: 2
+    redis_lease_seconds: 65
+  http_transport:
+    entry: src/main/java/com/bedrock/app/auth/security/SafeHttp.java
+    behavior: 헤더뿐 아니라 본문 완료까지 제한 시간을 적용한다. 만료·호출자 중단 시 HTTP 전송을 취소하고 수신 크기 초과 시 중단한다.
+    applies_to: [AI, OCR, OAuth, Vault, 유출_비밀번호_조회]
+    rationale: Java 21의 기본 HttpRequest timeout은 응답 헤더까지만 적용된다.
+    reference: https://inside.java/2026/03/04/jdk-26-http-client/
+
+# 아래는 주입해야 하는 속성 이름이다. 실제 비밀값은 저장소 밖에서 관리한다.
+configuration:
+  mail_secrets:
+    properties: [bedrock.mail.code-hmac-key]
+    requirement: Base64로 인코딩한 32바이트 이상의 외부 HMAC 키
+  smtp:
+    user_decision: 도메인과 SMTP 제공자 모두 아직 미정
+    properties: [spring.mail.host, spring.mail.port, spring.mail.username, spring.mail.password, bedrock.mail.from-address]
+    optional_properties: [bedrock.mail.alert-address, bedrock.mail.bounce-warning-ratio]
+    warning_rule: 최근 60분 성공+반송 20건 이상에서 반송률 기본 5%, 시간당 경고 한 번
+    remaining: 실제 SMTP 제공자·발신 도메인·SPF/DKIM/DMARC·지연 반송 수신 설정과 실제 발송 확인
+  sendgrid_events:
+    optional: true
+    properties: [bedrock.mail.sendgrid.webhook.verification-key]
+    endpoint: POST /api/v1/mail/events/sendgrid
+    requirement: 서비스 전용 제공자 계정의 Base64 X509 EC 256비트 공개키. 서명된 Event Webhook을 켜고 전달 완료·반송 이벤트를 연결한다.
+    current: 유효한 서명 헤더가 있어도 검증 키를 설정하지 않으면 FEATURE_NOT_READY로 실패한다.
+    behavior: 세션·CSRF 대신 원본 본문의 ECDSA 서명으로 인증한다. 1MB·1000개 이벤트, 서명 시각 24시간 및 미래 5분 상한.
+    warning_denominator: 공개키 설정 시 SMTP 접수 성공을 제외하고 제공자 전달 완료와 영구 반송으로 집계해 이중 분모를 막는다.
+    references:
+      - https://www.twilio.com/docs/sendgrid/for-developers/tracking-events/getting-started-event-webhook-security-features
+      - https://www.twilio.com/docs/sendgrid/for-developers/tracking-events/event
+  vault:
+    properties: [bedrock.crypto.provider, bedrock.crypto.vault.address, bedrock.crypto.vault.token, bedrock.kms.key-id]
+    provider_value: vault
+    optional_properties: [bedrock.crypto.vault.transit-mount, bedrock.crypto.vault.key-mount, bedrock.crypto.vault.timeout]
+    requirement: HTTPS Vault, Transit 키, KV v2 저장소, 생성·복호화·CAS·이전 버전 파기 권한
+    current: provider를 설정하지 않으면 기존 실패 Stub이 유지된다.
+  oauth_registration:
+    properties:
+      - bedrock.auth.oauth.google.web-client-id
+      - bedrock.auth.oauth.google.native-client-id
+      - bedrock.auth.oauth.apple.web-client-id
+      - bedrock.auth.oauth.apple.native-client-id
+      - bedrock.auth.oauth.apple.web-client-secret
+      - bedrock.auth.oauth.apple.native-client-secret
+      - bedrock.auth.oauth.redirect-uris
+      - bedrock.auth.flow-key
+    requirement: 등록한 클라이언트 ID·콜백, Apple 교환/해지용 client_secret JWT, Base64 32바이트 flow 암호화 키
+    remaining: 제공자 콘솔 등록과 Apple client_secret 만료 전 외부 갱신
+  public_origin:
+    properties: [bedrock.auth.public-origin]
+    requirement: 경로·끝 슬래시 없는 API HTTPS origin. 내가 아니다 링크에 사용한다.
+  model_credentials:
+    properties: [bedrock.ai.api-key, bedrock.ai.model]
+  heic_layout_credentials:
+    properties: [bedrock.ocr.azure.endpoint, bedrock.ocr.azure.api-key]
+    requirement: HTTPS *.cognitiveservices.azure.com 루트 endpoint
+  password_breach_lookup:
+    endpoint: https://api.pwnedpasswords.com/range/
+    behavior: SHA-1 앞 5자리만 전송하고 응답 패딩을 사용한다. 오류 시 새 비밀번호 수락을 중단한다.
+  redis:
+    requirement: 세션·한도·작업 잠금·반송 경고. 베타 리텐션 집계는 Redis 7 이상 필요.
+
+operations:
+  domain:
+    remaining: 서비스 도메인, 세 하위 도메인, TLS, 로그인 콜백, 메일 인증, CORS 운영값 확정
+  backup_and_operator_policy:
+    remaining:
+      - 외부 데이터 키 백업 7일, 애플리케이션 DB 백업 35일 보관·만료 설정
+      - 운영자 접속 기록의 위변조 방지 및 1년 이상 보관
+      - 사람 계정의 상시 KMS 복호화 권한 제거
+      - 복원 후 삭제 표식 재적용을 BE2와 검증
+    status: 운영 인프라 권한·구성이 없어 미적용
+  beta_metrics:
+    enabled_property: bedrock.metrics.beta.enabled
+    default_enabled: false
+    storage: Redis 일별 HMAC 가명 집합은 UTC 날짜 기준 35일 TTL. 생성 횟수 SQL 기록은 35일 보관 정책·시간별 정리 작업. 물리 삭제 시 두 저장소의 가명을 제거한다.
+    activity_definition: 로그인 또는 X-Bedrock-User-Activity 값이 1인 인증 요청
+    collected: [일일 활성 사용자 수, 등록 계정 수, 일일 활성 비율, 가입일 코호트의 30일째 재방문 수]
+    creation_source_property: bedrock.metrics.beta.creation-source-enabled
+    creation_source_default: false
+    prepared: [일일 논리 아이템 만들기 수, 일일 활성 사용자당 만들기 수]
+    activation: 생성 생산자를 모든 BE2 쓰기 경로에 연결하고 검증한 뒤 두 설정을 함께 켠다. 수집을 꺼도 기존 생성 기록의 정리·계정 삭제는 계속한다.
+    ratio_denominator: 현재 ACTIVE·DELETION_PENDING 계정 수. PURGING 계정은 제외한다.
+    remaining: beta_item_creation 연동, 운영 지표 수집기·대시보드 연결
+    exposure: 공통 Actuator 설정을 바꾸지 않았으므로 health 이외 외부 노출은 추가하지 않았다.
+
+migrations:
+  - file: src/main/resources/db/migration/V101__auth_key_cleanup.sql
+    purpose: 계정 생성 롤백 뒤 남은 외부 키의 내구성 있는 정리 기록
+  - file: src/main/resources/db/migration/V102__conversation_idempotency.sql
+    purpose: 대화 삭제 ID 및 쓰기 ID 보존, 암호화 응답 스냅샷
+  - file: src/main/resources/db/migration/V103__auth_workspace_binding.sql
+    purpose: 기존 가입 포트 반환 ID를 계정에 보관해 대화·탈퇴 정리에 공통 워크스페이스 잠금 적용
+  - file: src/main/resources/db/migration/V104__mail_provider_events.sql
+    purpose: 서명된 메일 제공자 이벤트 HMAC 중복 방지
+  - file: src/main/resources/db/migration/V105__beta_creation_metrics.sql
+    purpose: 동일 아이템 쓰기 트랜잭션의 베타 생성 횟수 기록
+  - existing_migrations_changed: false
+
+verification:
+  main_java_compilation:
+    result: passed
+    method: 캐시 의존성·Lombok으로 Java 21 javac 전체 본문 소스 컴파일
+    limitation: Gradle 빌드·Spring 기동·난독화 검증을 대신하지 않는다.
+  standalone_contract_checks:
+    result: passed
+    groups: {crypto: 7, mail: 6, mail_webhook: 5, auth: 5, http: 5, ai: 9, ocr: 3}
+    total: 40
+    method: 각 ContractChecks main 실행. 외부 서비스·DB·Redis 접속 없이 검증.
+  deployment_scripts:
+    command: bash scripts/tests/deployment-scripts.sh
+    result: passed
+  gradle:
+    command: GRADLE_USER_HOME=/tmp/bedrock-be1-gradle ./gradlew --offline test bootJarObfuscate
+    result: blocked_before_build
+    reason: FileLockContentionHandler 초기화에서 usable wildcard IP를 얻지 못함
+  obfuscated_image:
+    command: bash scripts/tests/obfuscated-smoke.sh
+    result: blocked_before_image_build
+    reason: Docker context와 /var/run/docker.sock 접근 권한 없음
+  integration_tests:
+    result: added_but_not_executed
+    coverage: PostgreSQL·Redis 메일 한도, HTTP 세션·메일 검증·복구, 외부 키 정리, AI 완료 트랜잭션, 대화 삭제·멱등성, 반송 수신 원자성, 생성 횟수 중복 방지·롤백, 복구 후속 실패의 롤백·재시도와 Apple 해지 경쟁
+    limitation: 전체 JUnit/Testcontainers 의존성과 Docker 실행 환경이 없어 컴파일·실행하지 못함
+    recovery_regressions:
+      file: src/test/java/com/bedrock/app/auth/AuthRecoveryIntegrationTest.java
+      cases: 5
+      status: added_but_not_executed
+  shared_test_followup:
+    file: src/test/java/com/bedrock/app/common/DatabaseMigrationTest.java
+    unchanged: true
+    required_changes:
+      - 마이그레이션 개수 기대값에 BE1 신규 마이그레이션을 반영한다.
+      - 테이블 개수 기대값 32를 BE1 신규 테이블 5개를 포함한 37로 갱신한다.
+      - 테스트의 V101__be1_probe.sql 번호를 실제 V101과 충돌하지 않는 번호로 옮긴다.
+    note: common 변경 금지 결정에 따라 수정하지 않았다. 실행 환경을 복구해도 이 기대값 조정은 별도로 필요하다.

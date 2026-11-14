@@ -14,6 +14,7 @@ import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.Instant;
+import java.time.Duration;
 
 /** 공통 명세의 mail_bounces 저장 모델. 기능별 검증과 변경 연산은 담당 패키지에서 구현한다. */
 @Entity
@@ -41,4 +42,36 @@ public class MailBounce {
     @LastModifiedDate
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
+
+    public boolean isBlocked(Instant now) {
+        clearExpiredBlock(now);
+        return blockedUntil != null;
+    }
+
+    public boolean canSend(Instant now) {
+        return !bounced && !isBlocked(now);
+    }
+
+    public void recordFailedCode(Instant now) {
+        clearExpiredBlock(now);
+        if (blockedUntil != null) return;
+        consecutiveFailCount = Math.min(100, consecutiveFailCount + 1);
+        if (consecutiveFailCount == 100) blockedUntil = now.plus(Duration.ofHours(24));
+    }
+
+    public void recordVerifiedCode() {
+        consecutiveFailCount = 0;
+        blockedUntil = null;
+    }
+
+    public void recordHardBounce() {
+        bounced = true;
+    }
+
+    private void clearExpiredBlock(Instant now) {
+        if (blockedUntil != null && !now.isBefore(blockedUntil)) {
+            blockedUntil = null;
+            consecutiveFailCount = 0;
+        }
+    }
 }
